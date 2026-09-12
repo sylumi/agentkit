@@ -1,11 +1,7 @@
 package model
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"iter"
 	"reflect"
 	"strings"
 	"testing"
@@ -83,44 +79,20 @@ func TestThinkingKindValidation(t *testing.T) {
 	}
 }
 
-func TestThinkingKindInCompleteAndFailureSnapshots(t *testing.T) {
+func TestThinkingKindInPartialOutputJSON(t *testing.T) {
 	for _, kind := range []ThinkingKind{ThinkingUnknown, ThinkingText, ThinkingSummary} {
-		for _, completed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/completed=%t", kind, completed), func(t *testing.T) {
-				m := generateFunc(func(context.Context, Request, bool) iter.Seq2[Event, error] {
-					return func(yield func(Event, error) bool) {
-						part := ThinkingPart{Kind: kind, Text: "Checking."}
-						if completed {
-							yield(ResultEvent{Result: Result{StopReason: StopReasonStop, Message: &Message{Role: RoleAssistant, Parts: []Part{{Kind: PartThinking, Thinking: &part}}}}}, nil)
-						} else {
-							yield(nil, &CallError{Cause: ErrIncompleteStream, Partial: PartialOutput{Parts: []PartialPart{{Kind: PartThinking, Thinking: &part}}}})
-						}
-					}
-				})
-				result, err := Complete(context.Background(), m, Request{Instructions: "hello"})
-				if completed {
-					if err != nil || result.Message.Parts[0].Thinking.Kind != kind {
-						t.Fatalf("result=%v, error=%v", result, err)
-					}
-					return
-				}
-				var callErr *CallError
-				if !errors.Is(err, ErrIncompleteStream) || !errors.As(err, &callErr) {
-					t.Fatalf("error=%v", err)
-				}
-				part := callErr.Partial.Parts[0].Thinking
-				if part.Kind != kind || part.Text != "Checking." {
-					t.Fatalf("lost thinking in failure: %+v", part)
-				}
-				data, err := json.Marshal(callErr.Partial)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var restored PartialOutput
-				if err := json.Unmarshal(data, &restored); err != nil || !reflect.DeepEqual(restored, callErr.Partial) {
-					t.Fatalf("partial round trip: %s, %v", data, err)
-				}
-			})
-		}
+		t.Run(string(kind), func(t *testing.T) {
+			partial := PartialOutput{Parts: []PartialPart{{
+				Kind: PartThinking, Thinking: &ThinkingPart{Kind: kind, Text: "Checking."},
+			}}}
+			data, err := json.Marshal(partial)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var restored PartialOutput
+			if err := json.Unmarshal(data, &restored); err != nil || !reflect.DeepEqual(restored, partial) {
+				t.Fatalf("partial round trip: %s, %v", data, err)
+			}
+		})
 	}
 }

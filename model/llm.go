@@ -5,10 +5,10 @@ import (
 	"iter"
 )
 
-// Model generates assistant output using a configured model connection.
+// LLM generates assistant output using a configured model connection.
 // Implementations must support independent concurrent calls without sharing
 // mutable generation state between them.
-type Model interface {
+type LLM interface {
 	// Generate returns a lazy, single-use iterator. No request or background
 	// reading starts until iteration, which checks ctx and validates req before
 	// I/O. Reusing the iterator must fail without sending another request.
