@@ -1,5 +1,7 @@
 package model
 
+import "slices"
+
 // ModelInfo describes a model; an LLM executes requests. Catalog declarations
 // do not imply adapter support or account access, and are not request defaults.
 type ModelInfo struct {
@@ -75,4 +77,47 @@ type PriceTier struct {
 	Kind      string `json:"kind"`
 	Threshold int64  `json:"threshold"`
 	Rates     Rates  `json:"rates"`
+}
+
+// Clone returns an independent copy, including all nested pointers and slices.
+// Nil pointers and nil versus empty slices are preserved.
+func (m ModelInfo) Clone() ModelInfo {
+	m.Provider.APIKeyEnv = slices.Clone(m.Provider.APIKeyEnv)
+	m.Capabilities = Capabilities{
+		ToolCall: clone(m.Capabilities.ToolCall), StructuredOutput: clone(m.Capabilities.StructuredOutput),
+		Temperature: clone(m.Capabilities.Temperature), Reasoning: clone(m.Capabilities.Reasoning),
+	}
+	m.Modalities.Input = slices.Clone(m.Modalities.Input)
+	m.Modalities.Output = slices.Clone(m.Modalities.Output)
+	m.Limits = Limits{
+		ContextTokens: clone(m.Limits.ContextTokens), MaxInputTokens: clone(m.Limits.MaxInputTokens),
+		MaxOutputTokens: clone(m.Limits.MaxOutputTokens),
+	}
+	m.ReasoningOptions.Toggle = clone(m.ReasoningOptions.Toggle)
+	m.ReasoningOptions.Efforts = slices.Clone(m.ReasoningOptions.Efforts)
+	if b := m.ReasoningOptions.Budget; b != nil {
+		m.ReasoningOptions.Budget = &TokenRange{Min: clone(b.Min), Max: clone(b.Max)}
+	}
+	if p := m.Pricing; p != nil {
+		m.Pricing = &Pricing{Rates: cloneRates(p.Rates), Tiers: slices.Clone(p.Tiers)}
+		for i := range m.Pricing.Tiers {
+			m.Pricing.Tiers[i].Rates = cloneRates(p.Tiers[i].Rates)
+		}
+	}
+	return m
+}
+
+func clone[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+func cloneRates(r Rates) Rates {
+	return Rates{
+		Input: clone(r.Input), Output: clone(r.Output), CacheRead: clone(r.CacheRead), CacheWrite: clone(r.CacheWrite),
+		Reasoning: clone(r.Reasoning), InputAudio: clone(r.InputAudio), OutputAudio: clone(r.OutputAudio),
+	}
 }

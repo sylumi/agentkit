@@ -56,9 +56,12 @@ func buildOpenAIParams(info model.ModelInfo, req model.Request) (responses.Respo
 		if err := decoder.Decode(&schema); err != nil {
 			return p, err
 		}
-		p.Tools = append(p.Tools, responses.ToolUnionParam{OfFunction: &responses.FunctionToolParam{
-			Name: tool.Name, Description: param.NewOpt(tool.Description), Parameters: schema, Strict: param.NewOpt(false),
-		}})
+		p.Tools = append(p.Tools, responses.ToolUnionParam{
+			OfFunction: &responses.FunctionToolParam{
+				Name:        tool.Name,
+				Description: param.NewOpt(tool.Description),
+				Parameters:  schema, Strict: param.NewOpt(false),
+			}})
 	}
 	return p, nil
 }

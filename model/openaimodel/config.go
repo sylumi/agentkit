@@ -12,52 +12,28 @@ import (
 )
 
 // Config selects a model and optionally overrides its connection defaults.
-// An omitted Provider selects OpenAI. OpenAI fills missing connection defaults;
-// other providers are used as supplied. BaseURL selects an API root, not a protocol.
+// Model and provider IDs are supplied by the caller; Generate rejects an empty
+// model ID before I/O.
+// BaseURL is selected from Config, Model, then Model.Provider, and selects an
+// API root without a query or fragment, not a protocol.
 type Config struct {
 	Model model.ModelInfo
 
 	// Empty strings leave these overrides unspecified. APIKey otherwise takes
 	// precedence over Model.Provider.APIKeyEnv, which is read at construction.
-	// For OpenAI, a nil APIKeyEnv uses OPENAI_API_KEY; an empty slice disables lookup.
+	// A nil or empty APIKeyEnv disables environment lookup for every provider.
 	APIKey     string
 	BaseURL    string
 	HTTPClient *http.Client
 
-	// Options are applied after SDK environment defaults, model/provider defaults,
-	// and the fields above. They may override values or supply additional settings,
-	// such as organization and project. WithMaxRetries(0) is applied last.
+	// Options may override credentials and HTTPClient or supply additional settings,
+	// such as organization and project. The resolved BaseURL and WithMaxRetries(0)
+	// are applied last and cannot be overridden by Options.
 	Options []option.RequestOption
 }
 
 func normalizeConfig(cfg Config) (Config, error) {
-	if cfg.Model.ID == "" || strings.TrimSpace(cfg.Model.ID) != cfg.Model.ID {
-		return cfg, fmt.Errorf("openai: config.model: required without surrounding whitespace")
-	}
 	p := cfg.Model.Provider
-	if p.ID == "" && p.Name == "" && p.BaseURL == "" && p.APIKeyEnv == nil {
-		p.ID = "openai"
-	}
-	if p.ID == "openai" {
-		if p.Name == "" {
-			p.Name = "OpenAI"
-		}
-		if p.BaseURL == "" {
-			p.BaseURL = "https://api.openai.com/v1/"
-		}
-		if p.APIKeyEnv == nil {
-			p.APIKeyEnv = []string{"OPENAI_API_KEY"}
-		}
-	}
-	if p.ID == "" || strings.TrimSpace(p.ID) != p.ID {
-		return cfg, fmt.Errorf("openai: config.model.provider.id: required without surrounding whitespace")
-	}
-	for _, name := range p.APIKeyEnv {
-		if name == "" || strings.TrimSpace(name) != name || strings.ContainsAny(name, "=\x00") {
-			return cfg, fmt.Errorf("openai: config.model.provider.api_key_env: invalid variable name")
-		}
-	}
-	cfg.Model.Provider = p
 	if cfg.APIKey == "" {
 		for _, name := range p.APIKeyEnv {
 			if value := os.Getenv(name); value != "" {
@@ -66,34 +42,32 @@ func normalizeConfig(cfg Config) (Config, error) {
 			}
 		}
 	}
-	for _, c := range cfg.APIKey {
-		if c < 33 || c > 126 {
-			return cfg, fmt.Errorf("openai: config.api_key: expected visible ASCII without spaces")
-		}
-	}
-	for _, field := range []struct{ name, value string }{
-		{"model.provider.base_url", p.BaseURL}, {"model.base_url", cfg.Model.BaseURL}, {"base_url", cfg.BaseURL},
-	} {
-		if field.value == "" {
-			continue
-		}
-		u, err := url.Parse(field.value)
-		if err != nil || strings.TrimSpace(field.value) != field.value {
-			return cfg, fmt.Errorf("openai: config.%s: invalid URL", field.name)
-		}
-		if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.Opaque != "" ||
-			u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(field.value, "#") {
-			return cfg, fmt.Errorf("openai: config.%s: expected an HTTP API root without credentials, query, or fragment", field.name)
-		}
-	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = cfg.Model.BaseURL
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = p.BaseURL
 	}
-	if cfg.BaseURL != "" && !strings.HasSuffix(cfg.BaseURL, "/") {
-		cfg.BaseURL += "/"
+	if cfg.BaseURL == "" {
+		return cfg, fmt.Errorf("openai: config.base_url: required")
 	}
+
+	u, err := url.Parse(cfg.BaseURL)
+	if err != nil {
+		return cfg, fmt.Errorf("openai: config.base_url: invalid URL")
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return cfg, fmt.Errorf("openai: config.base_url: expected an HTTP or HTTPS URL")
+	}
+	if u.RawQuery != "" || u.ForceQuery || strings.Contains(cfg.BaseURL, "#") {
+		return cfg, fmt.Errorf("openai: config.base_url: query and fragment are not supported")
+	}
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/"
+		if u.RawPath != "" {
+			u.RawPath += "/"
+		}
+	}
+	cfg.BaseURL = u.String()
 	return cfg, nil
 }

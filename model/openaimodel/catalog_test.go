@@ -38,17 +38,17 @@ func TestModelConnectionDefaultsAndOverrides(t *testing.T) {
 		cfg                            openaimodel.Config
 		wantURL, wantKey, wantProvider string
 	}{
-		{"builtin", openaimodel.Config{Model: builtin}, "https://api.openai.com/v1/responses", "official-test-key", "openai"},
-		{"manual OpenAI", openaimodel.Config{Model: model.ModelInfo{ID: "manual"}}, "https://api.openai.com/v1/responses", "official-test-key", "openai"},
+		{"builtin does not inherit SDK key", openaimodel.Config{Model: builtin, BaseURL: "https://api.openai.com/v1/"}, "https://api.openai.com/v1/responses", "", "openai"},
+		{"manual OpenAI", openaimodel.Config{Model: model.ModelInfo{ID: "manual", Provider: model.ProviderInfo{ID: "openai", BaseURL: "https://api.openai.com/v1/", APIKeyEnv: []string{"OPENAI_API_KEY"}}}}, "https://api.openai.com/v1/responses", "official-test-key", "openai"},
 		{"provider defaults", openaimodel.Config{Model: custom}, "https://provider.invalid/v1/responses", "gateway-test-key", "gateway"},
 		{"model URL", openaimodel.Config{Model: model.ModelInfo{ID: "custom-model", Provider: custom.Provider, BaseURL: "https://model.invalid/v2"}}, "https://model.invalid/v2/responses", "gateway-test-key", "gateway"},
 		{"explicit Config", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", APIKey: "explicit-test-key"}, "https://config.invalid/v3/responses", "explicit-test-key", "gateway"},
-		{"SDK overrides", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", APIKey: "explicit-test-key", Options: []option.RequestOption{
+		{"resolved URL overrides SDK option", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", APIKey: "explicit-test-key", Options: []option.RequestOption{
 			option.WithBaseURL("https://options.invalid/v4"), option.WithAPIKey("option-test-key"),
-		}}, "https://options.invalid/v4/responses", "option-test-key", "gateway"},
-		{"Options only", openaimodel.Config{Model: model.ModelInfo{ID: "custom-model", Provider: model.ProviderInfo{ID: "gateway"}}, Options: []option.RequestOption{
+		}}, "https://config.invalid/v3/responses", "option-test-key", "gateway"},
+		{"provider URL overrides SDK option", openaimodel.Config{Model: custom, Options: []option.RequestOption{
 			option.WithBaseURL("https://options.invalid/v4"), option.WithAPIKey("option-test-key"),
-		}}, "https://options.invalid/v4/responses", "option-test-key", "gateway"},
+		}}, "https://provider.invalid/v1/responses", "option-test-key", "gateway"},
 		{"header auth", openaimodel.Config{Model: model.ModelInfo{ID: "custom-model", Provider: model.ProviderInfo{ID: "gateway", BaseURL: "https://headers.invalid/"}}, Options: []option.RequestOption{
 			option.WithHeader("Authorization", "Bearer header-test-key"),
 		}}, "https://headers.invalid/responses", "header-test-key", "gateway"},
@@ -61,7 +61,11 @@ func TestModelConnectionDefaultsAndOverrides(t *testing.T) {
 				if r.URL.String() != tc.wantURL {
 					t.Error("URL precedence changed")
 				}
-				if r.Header.Get("Authorization") != "Bearer "+tc.wantKey {
+				wantAuth := ""
+				if tc.wantKey != "" {
+					wantAuth = "Bearer " + tc.wantKey
+				}
+				if r.Header.Get("Authorization") != wantAuth {
 					t.Error("credential precedence changed")
 				}
 				var request struct {
@@ -137,6 +141,12 @@ func TestCustomProviderDoesNotInheritOpenAICredentialsOrRouting(t *testing.T) {
 				return nil, errors.New("test transport stops here")
 			})},
 		})
+		if endpoint == "" {
+			if err == nil || calls != 0 {
+				t.Fatal("missing URL must fail before I/O")
+			}
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
