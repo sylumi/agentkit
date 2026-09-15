@@ -10,6 +10,7 @@ import (
 )
 
 func TestGenerateConfigValidate(t *testing.T) {
+	enabled, disabled := true, false
 	for _, tt := range []struct {
 		name      string
 		config    model.GenerateConfig
@@ -19,6 +20,16 @@ func TestGenerateConfigValidate(t *testing.T) {
 		{"positive limit", model.GenerateConfig{MaxOutputTokens: tokenCount(1)}, ""},
 		{"zero limit", model.GenerateConfig{MaxOutputTokens: tokenCount(0)}, "max_output_tokens"},
 		{"negative limit", model.GenerateConfig{MaxOutputTokens: tokenCount(-1)}, "max_output_tokens"},
+		{"empty reasoning", model.GenerateConfig{Reasoning: &model.ReasoningConfig{}}, ""},
+		{"reasoning on", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Enabled: &enabled}}, ""},
+		{"reasoning off", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Enabled: &disabled}}, ""},
+		{"effort", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Effort: "high"}}, ""},
+		{"custom effort", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Effort: "custom-level"}}, ""},
+		{"on with effort", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Enabled: &enabled, Effort: "low"}}, ""},
+		{"off with effort", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Enabled: &disabled, Effort: "low"}}, "reasoning.effort"},
+		{"off spelling", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Effort: "none"}}, "reasoning.effort"},
+		{"blank effort", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Effort: " \t"}}, "reasoning.effort"},
+		{"effort padding", model.GenerateConfig{Reasoning: &model.ReasoningConfig{Effort: " high"}}, "reasoning.effort"},
 		{"empty choice", model.GenerateConfig{ToolChoice: &model.ToolChoice{}}, "tool_choice.mode"},
 		{"unknown mode", model.GenerateConfig{ToolChoice: &model.ToolChoice{Mode: "unknown"}}, "tool_choice.mode"},
 		{"auto", model.GenerateConfig{ToolChoice: &model.ToolChoice{Mode: model.ToolChoiceAuto}}, ""},

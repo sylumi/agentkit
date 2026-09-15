@@ -12,15 +12,20 @@ import (
 )
 
 // buildOpenAIParams converts a validated neutral request into independent SDK data.
-func buildOpenAIParams(modelName string, req model.Request) (responses.ResponseNewParams, error) {
+func buildOpenAIParams(info model.ModelInfo, req model.Request) (responses.ResponseNewParams, error) {
 	p := responses.ResponseNewParams{
-		Model: shared.ResponsesModel(modelName),
+		Model: shared.ResponsesModel(info.ID),
 		Store: param.NewOpt(false),
 	}
 	if req.Instructions != "" {
 		p.Instructions = param.NewOpt(req.Instructions)
 	}
 	if cfg := req.Config; cfg != nil {
+		var err error
+		p.Reasoning, err = mapReasoning(cfg.Reasoning, info)
+		if err != nil {
+			return p, fmt.Errorf("responses: model %q: %w", info.ID, err)
+		}
 		if cfg.MaxOutputTokens != nil {
 			p.MaxOutputTokens = param.NewOpt(*cfg.MaxOutputTokens)
 		}

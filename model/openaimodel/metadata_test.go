@@ -10,7 +10,7 @@ import (
 )
 
 func TestResponseMetadataAndUsageSnapshots(t *testing.T) {
-	s := responseStream{}
+	s := responseStream{provider: "openai"}
 	var created responses.ResponseStreamEventUnion
 	if err := json.Unmarshal([]byte(`{"type":"response.created","response":{"id":"resp_1","model":"resolved","usage":{"input_tokens":12,"output_tokens":5,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":3}}}}`), &created); err != nil {
 		t.Fatal(err)

@@ -28,7 +28,7 @@ func requestFixture() model.Request {
 
 func TestRequestMapping(t *testing.T) {
 	req := requestFixture()
-	p, err := buildOpenAIParams("test-model", req)
+	p, err := buildOpenAIParams(model.ModelInfo{ID: "test-model"}, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRequestMapping(t *testing.T) {
 	}
 	message := &req.Messages[2]
 	message.Parts[0].ToolResult.IsError = false
-	p, err = buildOpenAIParams("test", req)
+	p, err = buildOpenAIParams(model.ModelInfo{ID: "test"}, req)
 	if err != nil || p.Input.OfInputItemList[3].OfFunctionCallOutput.Output.OfString.Value != "missing" {
 		t.Fatalf("ordinary tool output: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestRequestTextMessageBoundaries(t *testing.T) {
 			if err := req.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			p, err := buildOpenAIParams("test-model", req)
+			p, err := buildOpenAIParams(model.ModelInfo{ID: "test-model"}, req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +208,7 @@ func TestRequestGenerateConfigMapping(t *testing.T) {
 			if err := req.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			p, err := buildOpenAIParams("test-model", req)
+			p, err := buildOpenAIParams(model.ModelInfo{ID: "test-model"}, req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -251,7 +251,7 @@ func TestRequestRejectsThinkingHistory(t *testing.T) {
 	for _, kind := range []model.ThinkingKind{model.ThinkingUnknown, model.ThinkingText, model.ThinkingSummary} {
 		part := model.ThinkingPart{Kind: kind, Text: "thinking"}
 		req := model.Request{Messages: []model.Message{{Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartThinking, Thinking: &part}}}}}
-		_, err := buildOpenAIParams("test-model", req)
+		_, err := buildOpenAIParams(model.ModelInfo{ID: "test-model"}, req)
 		if err == nil || !strings.Contains(err.Error(), "thinking history is not supported") {
 			t.Fatalf("accepted thinking history kind %q: %v", kind, err)
 		}

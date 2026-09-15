@@ -44,7 +44,7 @@ func TestThinkingAcrossStreamAndFinal(t *testing.T) {
 					}
 				}
 				if mode != "final only" {
-					apply(map[string]any{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"type": "reasoning", "id": "rs_1"}})
+					apply(map[string]any{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"type": "reasoning", "id": "rs_1", "encrypted_content": "opaque-reasoning-token"}})
 					apply(map[string]any{"type": tc.added, "output_index": 0, "content_index": 0, "summary_index": 0, "item_id": "rs_1", "part": map[string]any{"type": tc.partType, "text": ""}})
 					if part := s.snapshot().Parts[0].Thinking; part.Kind != tc.kind || part.Text != "" {
 						t.Fatalf("empty snapshot lost kind: %+v", part)
@@ -65,6 +65,7 @@ func TestThinkingAcrossStreamAndFinal(t *testing.T) {
 				apply(map[string]any{"type": "response.completed", "response": map[string]any{
 					"id": "resp_1", "status": "completed", "output": []map[string]any{{
 						"id": "rs_1", "type": "reasoning", tc.field: []map[string]any{{"type": tc.partType, "text": "Checking."}},
+						"encrypted_content": "opaque-reasoning-token",
 					}},
 				}})
 				want := []model.Event{model.PartStart{Index: 0, Kind: model.PartThinking, ThinkingKind: tc.kind}}
@@ -78,6 +79,9 @@ func TestThinkingAcrossStreamAndFinal(t *testing.T) {
 					t.Fatalf("events = %#v, want %#v before final result", received, want)
 				}
 				result := received[len(received)-1].(model.ResultEvent).Result
+				if result.Message == nil || len(result.Message.Parts) != 1 {
+					t.Fatal("encrypted data created an extra part or hid visible reasoning")
+				}
 				part := *result.Message.Parts[0].Thinking
 				if part.Kind != tc.kind || part.Text != "Checking." {
 					t.Fatalf("final thinking: %+v", part)
@@ -149,7 +153,7 @@ func TestEncryptedReasoningField(t *testing.T) {
 		{"absent", "", ""},
 		{"null", "null", ""},
 		{"empty", `""`, ""},
-		{"encrypted", `"private-token"`, "non-empty string, 13 bytes"},
+		{"encrypted", `"private-token"`, ""},
 		{"false", "false", "must be a string or null, got bool"},
 		{"number", "123", "must be a string or null, got float64"},
 		{"object", `{}`, "must be a string or null, got map[string]interface {}"},

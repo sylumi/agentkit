@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"sync/atomic"
 
 	"github.com/openai/openai-go/v3"
@@ -16,35 +17,46 @@ import (
 
 type openAIModel struct {
 	client *openai.Client
-	name   string
+	info   model.ModelInfo
 }
 
 // NewModel validates the base configuration and creates a model without sending
 // a request. The returned model supports independent concurrent calls. Options
-// are applied in this order: SDK environment defaults, Config fields,
-// Config.Options, then WithMaxRetries(0). SDK options use SDK validation.
+// are applied in this order: SDK environment defaults, model/provider defaults,
+// Config fields, Config.Options, then WithMaxRetries(0). Options use SDK validation.
 // BaseURL changes the API root only; it does not switch to Chat Completions or
-// detect the endpoint's capabilities.
+// detect the endpoint's capabilities. Missing credentials or routing supplied
+// through Options are checked by the SDK at request time, not by this constructor.
 func NewModel(cfg Config) (model.LLM, error) {
 	cfg, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
+	// Copy the mutable metadata read by Generate so the caller can reuse info.
+	info := cfg.Model
+	info.Capabilities.Reasoning = copyReasoningValue(info.Capabilities.Reasoning)
+	info.ReasoningOptions.Toggle = copyReasoningValue(info.ReasoningOptions.Toggle)
+	info.ReasoningOptions.Efforts = slices.Clone(info.ReasoningOptions.Efforts)
 	opts := []option.RequestOption{
+		// Apply even empty values so another provider cannot inherit implicit
+		// OpenAI credentials or routing. User Options can supply them afterward.
 		option.WithAPIKey(cfg.APIKey),
 		option.WithBaseURL(cfg.BaseURL),
-		option.WithHTTPClient(cfg.HTTPClient),
+	}
+	if cfg.HTTPClient != nil {
+		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
 	opts = append(opts, cfg.Options...)
 	opts = append(opts, option.WithMaxRetries(0))
 	client := openai.NewClient(opts...)
-	return &openAIModel{client: &client, name: cfg.Model}, nil
+	return &openAIModel{client: &client, info: info}, nil
 }
 
 // Generate returns a lazy, single-use iterator. Each consumed iterator owns its
 // context, HTTP request, and output buffers. stream selects SSE or ordinary JSON
 // responses; ordinary responses emit only a ResultEvent. Thinking output contains
-// visible reasoning text and summaries. Thinking history is unsupported.
+// visible reasoning text and summaries. Encrypted reasoning data is discarded;
+// it is not emitted or retained for replay. Thinking history is unsupported.
 // Tool results with IsError are encoded as JSON text containing is_error and
 // content, since Responses has no error flag.
 func (m *openAIModel) Generate(ctx context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
@@ -63,7 +75,7 @@ func (m *openAIModel) Generate(ctx context.Context, req model.Request, stream bo
 			fail(err)
 			return
 		}
-		if m == nil || m.client == nil || m.name == "" {
+		if m == nil || m.client == nil || m.info.ID == "" {
 			fail(fmt.Errorf("responses: model must be constructed with NewModel"))
 			return
 		}
@@ -71,7 +83,7 @@ func (m *openAIModel) Generate(ctx context.Context, req model.Request, stream bo
 			fail(err)
 			return
 		}
-		params, err := buildOpenAIParams(m.name, req)
+		params, err := buildOpenAIParams(m.info, req)
 		if err != nil {
 			fail(err)
 			return
@@ -99,7 +111,7 @@ func (m *openAIModel) generateComplete(ctx context.Context, params responses.Res
 		yield(nil, &model.CallError{Cause: protocolError("missing response")})
 		return
 	}
-	state := responseStream{}
+	state := responseStream{provider: m.info.Provider.ID}
 	err = state.completeResponse(*r)
 	if ctx.Err() != nil {
 		err = errors.Join(ctx.Err(), err)
@@ -115,7 +127,7 @@ func (m *openAIModel) generateStream(callCtx context.Context, params responses.R
 	stream := m.client.Responses.NewStreaming(callCtx, params)
 	defer stream.Close()
 	consumerStopped := false
-	state := responseStream{yield: func(event model.Event) bool {
+	state := responseStream{provider: m.info.Provider.ID, yield: func(event model.Event) bool {
 		if callCtx.Err() != nil {
 			return false
 		}

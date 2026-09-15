@@ -25,7 +25,7 @@ func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func protocolModel(t *testing.T, client *http.Client) model.LLM {
 	t.Helper()
 	m, err := openaimodel.NewModel(openaimodel.Config{
-		Model: "test-model", APIKey: "test-key",
+		Model: model.ModelInfo{ID: "test-model"}, APIKey: "test-key",
 		BaseURL: "https://example.invalid/", HTTPClient: client,
 	})
 	if err != nil {
@@ -140,6 +140,9 @@ func TestRequestModesProduceEquivalentResults(t *testing.T) {
 		{"summary", fullResponse("completed", wire{"id": "rs_1", "type": "reasoning", "summary": []wire{{"type": "summary_text", "text": "Checking."}}}, textItem("hello")), model.StopReasonStop},
 		{"reasoning", fullResponse("completed", wire{"id": "rs_1", "type": "reasoning", "content": []wire{{"type": "reasoning_text", "text": "Checking."}}}, textItem("hello")), model.StopReasonStop},
 		{"empty reasoning", fullResponse("completed", wire{"id": "rs_1", "type": "reasoning", "content": []wire{{"type": "reasoning_text", "text": ""}}}, textItem("hello")), model.StopReasonStop},
+		{"reasoning with encrypted data", fullResponse("completed", wire{"id": "rs_1", "type": "reasoning", "encrypted_content": "opaque-reasoning-token", "content": []wire{{"type": "reasoning_text", "text": "Checking."}}}, textItem("hello")), model.StopReasonStop},
+		{"summary with encrypted data", fullResponse("completed", wire{"id": "rs_1", "type": "reasoning", "encrypted_content": "opaque-reasoning-token", "summary": []wire{{"type": "summary_text", "text": "Checking."}}}, textItem("hello")), model.StopReasonStop},
+		{"encrypted data only", fullResponse("completed", wire{"id": "rs_1", "type": "reasoning", "encrypted_content": "opaque-reasoning-token", "content": []wire{}, "summary": []wire{}}, textItem("hello")), model.StopReasonStop},
 		{"tool", fullResponse("completed", callItem(`{"id":9007199254740993}`)), model.StopReasonToolCalls},
 		{"refusal", fullResponse("completed", wire{"id": "msg_1", "type": "message", "role": "assistant", "content": []wire{{"type": "refusal", "refusal": "Cannot comply."}}}), model.StopReasonBlocked},
 		{"truncated tool", fullResponse("incomplete", textItem("prefix"), callItem(`{"id":`)), model.StopReasonLength},
@@ -184,6 +187,13 @@ func TestRequestModesProduceEquivalentResults(t *testing.T) {
 					if err := model.ValidateEvent(event); err != nil {
 						t.Fatal(err)
 					}
+					data, err := json.Marshal(event)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if strings.Contains(string(data), "opaque-reasoning-token") {
+						t.Fatal("encrypted data was exposed in a public event")
+					}
 					if result != nil {
 						t.Fatal("event after final result")
 					}
@@ -201,10 +211,13 @@ func TestRequestModesProduceEquivalentResults(t *testing.T) {
 				if tc.name == "tool" && string(result.Message.Parts[0].ToolCall.Arguments) != `{"id":9007199254740993}` {
 					t.Fatal("tool arguments lost precision")
 				}
-				if tc.name == "summary" && result.Message.Parts[0].Thinking.Kind != model.ThinkingSummary {
-					t.Fatal("lost summary kind")
+				if tc.name == "summary" || tc.name == "summary with encrypted data" {
+					want := &model.ThinkingPart{Kind: model.ThinkingSummary, Text: "Checking."}
+					if !reflect.DeepEqual(result.Message.Parts[0].Thinking, want) {
+						t.Fatalf("summary = %+v, want %+v", result.Message.Parts[0].Thinking, want)
+					}
 				}
-				if tc.name == "reasoning" || tc.name == "empty reasoning" {
+				if tc.name == "reasoning" || tc.name == "empty reasoning" || tc.name == "reasoning with encrypted data" {
 					wantText := "Checking."
 					if tc.name == "empty reasoning" {
 						wantText = ""
@@ -212,6 +225,16 @@ func TestRequestModesProduceEquivalentResults(t *testing.T) {
 					want := &model.ThinkingPart{Kind: model.ThinkingText, Text: wantText}
 					if !reflect.DeepEqual(result.Message.Parts[0].Thinking, want) {
 						t.Fatalf("reasoning = %+v, want %+v", result.Message.Parts[0].Thinking, want)
+					}
+				}
+				if strings.Contains(tc.name, "encrypted data") {
+					wantParts := 2
+					if tc.name == "encrypted data only" {
+						wantParts = 1
+					}
+					if result.Message == nil || len(result.Message.Parts) != wantParts ||
+						!reflect.DeepEqual(result.Message.Parts[wantParts-1], model.NewTextPart("hello")) {
+						t.Fatal("encrypted data created a visible part or hid the answer")
 					}
 				}
 				results = append(results, result)
@@ -412,7 +435,7 @@ func TestNonStreamingCancellationWhileReading(t *testing.T) {
 			}))
 			defer server.Close()
 			m, err := openaimodel.NewModel(openaimodel.Config{
-				Model: "test-model", APIKey: "test-key",
+				Model: model.ModelInfo{ID: "test-model"}, APIKey: "test-key",
 				BaseURL: server.URL, HTTPClient: server.Client(),
 			})
 			if err != nil {

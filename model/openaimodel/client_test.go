@@ -85,7 +85,7 @@ func TestClientConfigurationPrecedence(t *testing.T) {
 			})}
 			options := append([]option.RequestOption{option.WithHTTPClient(client)}, tc.options...)
 			m, err := openaimodel.NewModel(openaimodel.Config{
-				Model: "test-model", APIKey: "config-key",
+				Model: model.ModelInfo{ID: "test-model"}, APIKey: "config-key",
 				BaseURL: "https://configured.invalid/v1",
 				HTTPClient: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
 					return nil, errors.New("base HTTP client should have been overridden")
@@ -136,7 +136,7 @@ func TestClientOptionsCannotEnableRetries(t *testing.T) {
 					}, nil
 				})}
 				m, err := openaimodel.NewModel(openaimodel.Config{
-					Model: "test-model", APIKey: "test-key", BaseURL: "https://example.invalid/", HTTPClient: client,
+					Model: model.ModelInfo{ID: "test-model"}, APIKey: "test-key", BaseURL: "https://example.invalid/", HTTPClient: client,
 					Options: []option.RequestOption{
 						option.WithMaxRetries(2),
 						option.WithMaxRetryDelay(time.Millisecond),

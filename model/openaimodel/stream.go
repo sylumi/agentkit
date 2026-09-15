@@ -29,6 +29,7 @@ type responseBlock struct {
 }
 
 type responseStream struct {
+	provider string
 	yield    func(model.Event) bool
 	items    map[int64]outputItem
 	blocks   []*responseBlock
@@ -71,17 +72,15 @@ func (s *responseStream) item(index int64, item responses.ResponseOutputItemUnio
 	if item.Type != "message" && item.Type != "function_call" && item.Type != "reasoning" {
 		return protocolError("unsupported output type %q", item.Type)
 	}
+	// Encrypted data is opaque provider state, not visible reasoning. Check its
+	// wire type and discard it; visible content and summaries are read separately.
 	if raw := item.JSON.EncryptedContent.Raw(); raw != "" && raw != "null" {
-		content, err := protocolString(raw)
-		if err != nil {
+		if _, err := protocolString(raw); err != nil {
 			var value any
 			if err := json.Unmarshal([]byte(raw), &value); err != nil {
 				return protocolError("encrypted_content is invalid JSON")
 			}
 			return protocolError("encrypted_content must be a string or null, got %T", value)
-		}
-		if content != "" {
-			return protocolError("encrypted reasoning output is not supported (encrypted_content: non-empty string, %d bytes; item_type=%s, content_parts=%d, summary_parts=%d)", len(content), item.Type, len(item.Content), len(item.Summary))
 		}
 	}
 	if item.Type == "function_call" {

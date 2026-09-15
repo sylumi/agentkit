@@ -34,7 +34,7 @@ func (s *responseStream) readUsage(usage responses.ResponseUsage) error {
 }
 
 func (s *responseStream) readMetadata(r responses.Response) error {
-	next := model.ResponseMetadata{Provider: "openai"}
+	next := model.ResponseMetadata{Provider: s.provider}
 	if s.metadata != nil {
 		next = *s.metadata
 	}
