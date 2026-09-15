@@ -40,6 +40,11 @@ func TestConfigValidation(t *testing.T) {
 		{"invalid URL", func(c *Config) { c.BaseURL = "https://example.com/%zz" }, "config.base_url:"},
 		{"unsupported scheme", func(c *Config) { c.BaseURL = "ftp://example.com" }, "config.base_url:"},
 		{"missing host", func(c *Config) { c.BaseURL = "https:///v1" }, "config.base_url:"},
+		{"URL username and password", func(c *Config) { c.BaseURL = "https://synthetic-user:password@example.com/v1" }, "userinfo is not supported"},
+		{"URL username", func(c *Config) { c.BaseURL = "https://synthetic-user@example.com/v1" }, "userinfo is not supported"},
+		{"empty URL userinfo", func(c *Config) { c.BaseURL = "https://@example.com/v1" }, "userinfo is not supported"},
+		{"model URL userinfo", func(c *Config) { c.Model.BaseURL = "https://synthetic-user:password@example.com/v1" }, "userinfo is not supported"},
+		{"provider URL userinfo", func(c *Config) { c.Model.Provider.BaseURL = "https://synthetic-user:password@example.com/v1" }, "userinfo is not supported"},
 		{"query", func(c *Config) { c.BaseURL = "https://example.com/v1?api-version=not-real" }, "query and fragment are not supported"},
 		{"empty query", func(c *Config) { c.BaseURL = "https://example.com/v1?" }, "query and fragment are not supported"},
 		{"fragment", func(c *Config) { c.BaseURL = "https://example.com/v1#section" }, "query and fragment are not supported"},
@@ -110,7 +115,7 @@ func TestOnlySelectedURLIsValidated(t *testing.T) {
 		{"override query and fragment", "https://config.invalid/v1", "https://model.invalid/v2?region=test", "https://provider.invalid/v3#section", "https://config.invalid/v1/"},
 		{"encoded path", "https://example.com/a%2Fb", "", "", "https://example.com/a%2Fb/"},
 		{"encoded delimiters", "https://example.com/a%3Fb%23c", "", "", "https://example.com/a%3Fb%23c/"},
-		{"URL user info", "https://user:password@example.com/v1", "", "", "https://user:password@example.com/v1/"},
+		{"override URL userinfo", "https://config.invalid/v1", "https://user:password@model.invalid/v2", "https://user:password@provider.invalid/v3", "https://config.invalid/v1/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := normalizeConfig(Config{

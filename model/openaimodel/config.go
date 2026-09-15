@@ -15,7 +15,7 @@ import (
 // Model and provider IDs are supplied by the caller; Generate rejects an empty
 // model ID before I/O.
 // BaseURL is selected from Config, Model, then Model.Provider, and selects an
-// API root without a query or fragment, not a protocol.
+// API root without userinfo, a query, or a fragment, not a protocol.
 type Config struct {
 	Model model.ModelInfo
 
@@ -58,6 +58,9 @@ func normalizeConfig(cfg Config) (Config, error) {
 	}
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
 		return cfg, fmt.Errorf("openai: config.base_url: expected an HTTP or HTTPS URL")
+	}
+	if u.User != nil {
+		return cfg, fmt.Errorf("openai: config.base_url: userinfo is not supported")
 	}
 	if u.RawQuery != "" || u.ForceQuery || strings.Contains(cfg.BaseURL, "#") {
 		return cfg, fmt.Errorf("openai: config.base_url: query and fragment are not supported")
