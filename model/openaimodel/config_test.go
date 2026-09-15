@@ -5,43 +5,53 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openai/openai-go/v3/option"
 	"github.com/sylumi/agentkit/model"
 )
 
 func TestConfig(t *testing.T) {
-	cfg := Config{Model: model.ModelInfo{ID: "test-model"}, APIKey: "test-key", BaseURL: "https://example.com", HTTPClient: &http.Client{}}
+	cfg := Config{Model: model.ModelInfo{ID: "test-model", Provider: model.ProviderInfo{ID: "openai"}}, APIKey: "test-key", BaseURL: "https://example.com", HTTPClient: &http.Client{}}
 	normalized, err := normalizeConfig(cfg)
 	if err != nil || normalized.BaseURL != "https://example.com/" || normalized.HTTPClient != cfg.HTTPClient || cfg.BaseURL != "https://example.com" {
 		t.Fatalf("normalize: %+v, %v", normalized, err)
 	}
-	cfg.Model.ID = ""
-	if _, err := NewModel(cfg); err == nil || !strings.Contains(err.Error(), "openai: config.model:") {
-		t.Fatalf("model error = %v", err)
-	}
-	cfg.Model.ID = "test-model"
 	if _, err := NewModel(cfg); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestConfigDefaultsAndValidation(t *testing.T) {
+func TestConfigValidation(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "default-test-key")
-	cfg, err := normalizeConfig(Config{Model: model.ModelInfo{ID: "test"}})
-	if err != nil || cfg.HTTPClient != nil || cfg.BaseURL != "https://api.openai.com/v1/" || cfg.Model.Provider.ID != "openai" {
-		t.Fatalf("default config: %v", err)
+	cfg := Config{Model: model.ModelInfo{ID: "test", Provider: model.ProviderInfo{ID: "openai", BaseURL: "https://api.openai.com/v1/"}}}
+	normalized, err := normalizeConfig(cfg)
+	if err != nil || normalized.APIKey != "" || normalized.Model.Provider.Name != "" {
+		t.Fatalf("explicit config: %v", err)
 	}
 	for _, tc := range []struct {
 		name   string
 		change func(*Config)
 		want   string
 	}{
-		{"model whitespace", func(c *Config) { c.Model.ID = " test" }, "config.model:"},
-		{"provider without ID", func(c *Config) { c.Model.Provider = model.ProviderInfo{Name: "test"} }, "provider.id:"},
-		{"invalid env", func(c *Config) { c.Model.Provider.APIKeyEnv = []string{"KEY=value"} }, "api_key_env:"},
-		{"invalid key", func(c *Config) { c.APIKey = "synthetic invalid value" }, "config.api_key:"},
-		{"invalid URL", func(c *Config) { c.BaseURL = "https://user:password@example.com" }, "config.base_url:"},
-		{"model query", func(c *Config) { c.Model.BaseURL = "https://example.com?token=not-real" }, "model.base_url:"},
-		{"provider URL", func(c *Config) { c.Model.Provider.BaseURL = "relative" }, "provider.base_url:"},
+		{"missing URL", func(c *Config) { c.Model.Provider.BaseURL = "" }, "config.base_url:"},
+		{"SDK option cannot supply URL", func(c *Config) {
+			c.Model.Provider.BaseURL = ""
+			c.Options = []option.RequestOption{option.WithBaseURL("https://options.invalid/")}
+		}, "config.base_url:"},
+		{"invalid URL", func(c *Config) { c.BaseURL = "https://example.com/%zz" }, "config.base_url:"},
+		{"unsupported scheme", func(c *Config) { c.BaseURL = "ftp://example.com" }, "config.base_url:"},
+		{"missing host", func(c *Config) { c.BaseURL = "https:///v1" }, "config.base_url:"},
+		{"URL username and password", func(c *Config) { c.BaseURL = "https://synthetic-user:password@example.com/v1" }, "userinfo is not supported"},
+		{"URL username", func(c *Config) { c.BaseURL = "https://synthetic-user@example.com/v1" }, "userinfo is not supported"},
+		{"empty URL userinfo", func(c *Config) { c.BaseURL = "https://@example.com/v1" }, "userinfo is not supported"},
+		{"model URL userinfo", func(c *Config) { c.Model.BaseURL = "https://synthetic-user:password@example.com/v1" }, "userinfo is not supported"},
+		{"provider URL userinfo", func(c *Config) { c.Model.Provider.BaseURL = "https://synthetic-user:password@example.com/v1" }, "userinfo is not supported"},
+		{"query", func(c *Config) { c.BaseURL = "https://example.com/v1?api-version=not-real" }, "query and fragment are not supported"},
+		{"empty query", func(c *Config) { c.BaseURL = "https://example.com/v1?" }, "query and fragment are not supported"},
+		{"fragment", func(c *Config) { c.BaseURL = "https://example.com/v1#section" }, "query and fragment are not supported"},
+		{"empty fragment", func(c *Config) { c.BaseURL = "https://example.com/v1#" }, "query and fragment are not supported"},
+		{"model query", func(c *Config) { c.Model.BaseURL = "https://example.com/v1?region=test" }, "query and fragment are not supported"},
+		{"provider query", func(c *Config) { c.Model.Provider.BaseURL = "https://example.com/v1?region=test" }, "query and fragment are not supported"},
+		{"provider URL", func(c *Config) { c.Model.Provider.BaseURL = "relative" }, "config.base_url:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			next := cfg
@@ -55,19 +65,19 @@ func TestConfigDefaultsAndValidation(t *testing.T) {
 			}
 		})
 	}
-	t.Setenv("AGENTKIT_TEST_INVALID_KEY", "synthetic invalid value")
-	cfg.Model.Provider.APIKeyEnv = []string{"AGENTKIT_TEST_INVALID_KEY", "OPENAI_API_KEY"}
+	t.Setenv("AGENTKIT_TEST_FIRST_KEY", "first-test-key")
+	cfg.Model.Provider.APIKeyEnv = []string{"AGENTKIT_TEST_FIRST_KEY", "OPENAI_API_KEY"}
 	cfg.APIKey = ""
-	if _, err := NewModel(cfg); err == nil {
-		t.Fatal("invalid first credential silently fell back")
+	if got, err := normalizeConfig(cfg); err != nil || got.APIKey != "first-test-key" {
+		t.Fatal("first nonempty environment value was not selected")
 	}
 	cfg.APIKey = "explicit-test-key"
-	if _, err := NewModel(cfg); err != nil {
-		t.Fatal("explicit key did not override invalid environment value")
+	if got, err := normalizeConfig(cfg); err != nil || got.APIKey != "explicit-test-key" {
+		t.Fatal("explicit key did not override environment value")
 	}
 }
 
-func TestOpenAIConnectionDefaultsAndOverrides(t *testing.T) {
+func TestCredentialLookup(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "openai-test-key")
 	t.Setenv("AGENTKIT_TEST_CUSTOM_KEY", "custom-test-key")
 	t.Setenv("AGENTKIT_TEST_EMPTY_KEY", "")
@@ -76,11 +86,12 @@ func TestOpenAIConnectionDefaultsAndOverrides(t *testing.T) {
 		provider         model.ProviderInfo
 		wantURL, wantKey string
 	}{
-		{"catalog without defaults", model.ProviderInfo{ID: "openai"}, "https://api.openai.com/v1/", "openai-test-key"},
+		{"OpenAI gets no key default", model.ProviderInfo{ID: "openai", BaseURL: "https://api.openai.com/v1/"}, "https://api.openai.com/v1/", ""},
+		{"explicit OpenAI key variable", model.ProviderInfo{ID: "openai", BaseURL: "https://api.openai.com/v1/", APIKeyEnv: []string{"OPENAI_API_KEY"}}, "https://api.openai.com/v1/", "openai-test-key"},
 		{"provider overrides", model.ProviderInfo{ID: "openai", BaseURL: "https://gateway.example/v1", APIKeyEnv: []string{"AGENTKIT_TEST_CUSTOM_KEY"}}, "https://gateway.example/v1/", "custom-test-key"},
-		{"empty list disables lookup", model.ProviderInfo{ID: "openai", APIKeyEnv: []string{}}, "https://api.openai.com/v1/", ""},
-		{"explicit empty variable does not fall back", model.ProviderInfo{ID: "openai", APIKeyEnv: []string{"AGENTKIT_TEST_EMPTY_KEY"}}, "https://api.openai.com/v1/", ""},
-		{"other provider gets no defaults", model.ProviderInfo{ID: "custom"}, "", ""},
+		{"empty list disables lookup", model.ProviderInfo{ID: "openai", BaseURL: "https://api.openai.com/v1/", APIKeyEnv: []string{}}, "https://api.openai.com/v1/", ""},
+		{"explicit empty variable does not fall back", model.ProviderInfo{ID: "openai", BaseURL: "https://api.openai.com/v1/", APIKeyEnv: []string{"AGENTKIT_TEST_EMPTY_KEY"}}, "https://api.openai.com/v1/", ""},
+		{"other provider gets no key default", model.ProviderInfo{ID: "custom", BaseURL: "https://custom.invalid"}, "https://custom.invalid/", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, err := normalizeConfig(Config{Model: model.ModelInfo{ID: "test", Provider: tc.provider}})
@@ -89,6 +100,30 @@ func TestOpenAIConnectionDefaultsAndOverrides(t *testing.T) {
 			}
 			if cfg.BaseURL != tc.wantURL || cfg.APIKey != tc.wantKey {
 				t.Fatal("connection defaults or explicit overrides were not respected")
+			}
+		})
+	}
+}
+
+func TestOnlySelectedURLIsValidated(t *testing.T) {
+	for _, tc := range []struct {
+		name, baseURL, modelURL, providerURL, want string
+	}{
+		{"config override", "https://config.invalid/v1", "invalid-model-url", "invalid-provider-url", "https://config.invalid/v1/"},
+		{"model override", "", "https://model.invalid/v2", "invalid-provider-url", "https://model.invalid/v2/"},
+		{"provider fallback", "", "", "https://provider.invalid/v3", "https://provider.invalid/v3/"},
+		{"override query and fragment", "https://config.invalid/v1", "https://model.invalid/v2?region=test", "https://provider.invalid/v3#section", "https://config.invalid/v1/"},
+		{"encoded path", "https://example.com/a%2Fb", "", "", "https://example.com/a%2Fb/"},
+		{"encoded delimiters", "https://example.com/a%3Fb%23c", "", "", "https://example.com/a%3Fb%23c/"},
+		{"override URL userinfo", "https://config.invalid/v1", "https://user:password@model.invalid/v2", "https://user:password@provider.invalid/v3", "https://config.invalid/v1/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := normalizeConfig(Config{
+				Model:   model.ModelInfo{ID: "test", BaseURL: tc.modelURL, Provider: model.ProviderInfo{ID: "custom", BaseURL: tc.providerURL}},
+				BaseURL: tc.baseURL,
+			})
+			if err != nil || cfg.BaseURL != tc.want {
+				t.Fatalf("selected URL = %q, error = %v; want %q", cfg.BaseURL, err, tc.want)
 			}
 		})
 	}

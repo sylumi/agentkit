@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"slices"
 	"sync/atomic"
 
 	"github.com/openai/openai-go/v3"
@@ -23,31 +22,27 @@ type openAIModel struct {
 // NewModel validates the base configuration and creates a model without sending
 // a request. The returned model supports independent concurrent calls. Options
 // are applied in this order: SDK environment defaults, model/provider defaults,
-// Config fields, Config.Options, then WithMaxRetries(0). Options use SDK validation.
+// Config fields, Config.Options, then the resolved BaseURL and WithMaxRetries(0).
+// Options use SDK validation.
 // BaseURL changes the API root only; it does not switch to Chat Completions or
-// detect the endpoint's capabilities. Missing credentials or routing supplied
-// through Options are checked by the SDK at request time, not by this constructor.
+// detect the endpoint's capabilities. Credentials supplied through Options are
+// checked by the SDK at request time, not by this constructor.
 func NewModel(cfg Config) (model.LLM, error) {
 	cfg, err := normalizeConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	// Copy the mutable metadata read by Generate so the caller can reuse info.
-	info := cfg.Model
-	info.Capabilities.Reasoning = copyReasoningValue(info.Capabilities.Reasoning)
-	info.ReasoningOptions.Toggle = copyReasoningValue(info.ReasoningOptions.Toggle)
-	info.ReasoningOptions.Efforts = slices.Clone(info.ReasoningOptions.Efforts)
+	info := cfg.Model.Clone()
 	opts := []option.RequestOption{
-		// Apply even empty values so another provider cannot inherit implicit
-		// OpenAI credentials or routing. User Options can supply them afterward.
+		// Apply even an empty key so another provider cannot inherit implicit
+		// OpenAI credentials. User Options can supply credentials afterward.
 		option.WithAPIKey(cfg.APIKey),
-		option.WithBaseURL(cfg.BaseURL),
 	}
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
 	opts = append(opts, cfg.Options...)
-	opts = append(opts, option.WithMaxRetries(0))
+	opts = append(opts, option.WithBaseURL(cfg.BaseURL), option.WithMaxRetries(0))
 	client := openai.NewClient(opts...)
 	return &openAIModel{client: &client, info: info}, nil
 }
@@ -75,8 +70,12 @@ func (m *openAIModel) Generate(ctx context.Context, req model.Request, stream bo
 			fail(err)
 			return
 		}
-		if m == nil || m.client == nil || m.info.ID == "" {
+		if m == nil || m.client == nil {
 			fail(fmt.Errorf("responses: model must be constructed with NewModel"))
+			return
+		}
+		if m.info.ID == "" {
+			fail(fmt.Errorf("responses: model ID is required"))
 			return
 		}
 		if err := req.Validate(); err != nil {

@@ -47,8 +47,8 @@ func TestReasoningRequests(t *testing.T) {
 		{"GPT max", "openai", "gpt-5.6", &model.ReasoningConfig{Effort: "max"}, "max", ""},
 		{"Astra has no declared off control", "openai", "gpt-6-astra", &model.ReasoningConfig{Enabled: &off}, "", "not declared by model metadata"},
 		{"Qwen rejects effort missing from metadata", "alibaba-cn", "qwen3.8-max", &model.ReasoningConfig{Effort: "high"}, "", "unsupported intensity"},
-		{"Qwen preserves protocol restriction", "alibaba-cn", "qwen3.8-max", &model.ReasoningConfig{Effort: "xhigh"}, "", "current Qwen Responses rule"},
-		{"Qwen shared effort", "alibaba", "qwen3.8-max", &model.ReasoningConfig{Effort: "medium"}, "medium", ""},
+		{"Qwen follows declared effort", "alibaba-cn", "qwen3.8-max", &model.ReasoningConfig{Effort: "xhigh"}, "xhigh", ""},
+		{"Qwen medium", "alibaba", "qwen3.8-max", &model.ReasoningConfig{Effort: "medium"}, "medium", ""},
 		{"Qwen international on needs effort", "alibaba", "qwen3.8-max", &model.ReasoningConfig{Enabled: &on}, "", "set an explicit intensity"},
 		{"Qwen 3.5 off", "alibaba-cn", "qwen3.5-plus", &model.ReasoningConfig{Enabled: &off}, "none", ""},
 		{"non-reasoning model on", "openai", "gpt-4.1", &model.ReasoningConfig{Enabled: &on}, "", "reasoning is not supported"},
@@ -153,6 +153,10 @@ func TestReasoningModelEfforts(t *testing.T) {
 		{"openai", "gpt-5.4"},
 		{"openai", "gpt-5.6"},
 		{"openai", "gpt-6-astra"},
+		{"alibaba", "qwen3.5-plus"},
+		{"alibaba-cn", "qwen3.5-plus"},
+		{"alibaba", "qwen3.8-max"},
+		{"alibaba-cn", "qwen3.8-max"},
 	} {
 		for _, tc := range []struct {
 			name      string

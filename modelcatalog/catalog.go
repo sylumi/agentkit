@@ -39,7 +39,7 @@ func (c *Catalog) Lookup(providerID, modelID string) (model.ModelInfo, bool) {
 	if !ok {
 		return model.ModelInfo{}, false
 	}
-	return cloneModelInfo(m), true
+	return m.Clone(), true
 }
 
 // List returns models ordered by provider ID and model ID. An empty providerID
@@ -48,7 +48,7 @@ func (c *Catalog) List(providerID string) []model.ModelInfo {
 	var result []model.ModelInfo
 	for _, key := range c.keys {
 		if providerID == "" || key.provider == providerID {
-			result = append(result, cloneModelInfo(c.models[key]))
+			result = append(result, c.models[key].Clone())
 		}
 	}
 	return result

@@ -25,13 +25,42 @@ func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 func protocolModel(t *testing.T, client *http.Client) model.LLM {
 	t.Helper()
 	m, err := openaimodel.NewModel(openaimodel.Config{
-		Model: model.ModelInfo{ID: "test-model"}, APIKey: "test-key",
+		Model: model.ModelInfo{ID: "test-model", Provider: model.ProviderInfo{ID: "openai"}}, APIKey: "test-key",
 		BaseURL: "https://example.invalid/", HTTPClient: client,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return m
+}
+
+func TestMissingModelIDFailsBeforeIO(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			calls := 0
+			m, err := openaimodel.NewModel(openaimodel.Config{
+				BaseURL: "https://example.invalid/",
+				HTTPClient: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+					calls++
+					return nil, errors.New("unexpected HTTP request")
+				})},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			yields := 0
+			for event, err := range m.Generate(context.Background(), model.Request{Instructions: "hello"}, stream) {
+				yields++
+				var callErr *model.CallError
+				if event != nil || !errors.As(err, &callErr) || !strings.Contains(err.Error(), "model ID is required") {
+					t.Fatalf("unexpected result: %v, %v", event, err)
+				}
+			}
+			if yields != 1 || calls != 0 {
+				t.Fatalf("yields=%d, HTTP calls=%d", yields, calls)
+			}
+		})
+	}
 }
 
 func TestDecodedInvalidMessagesFailBeforeIO(t *testing.T) {
@@ -435,7 +464,7 @@ func TestNonStreamingCancellationWhileReading(t *testing.T) {
 			}))
 			defer server.Close()
 			m, err := openaimodel.NewModel(openaimodel.Config{
-				Model: model.ModelInfo{ID: "test-model"}, APIKey: "test-key",
+				Model: model.ModelInfo{ID: "test-model", Provider: model.ProviderInfo{ID: "openai"}}, APIKey: "test-key",
 				BaseURL: server.URL, HTTPClient: server.Client(),
 			})
 			if err != nil {
