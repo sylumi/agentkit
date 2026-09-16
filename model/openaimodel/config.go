@@ -16,17 +16,20 @@ import (
 type Config struct {
 	Model model.ModelInfo
 
-	// APIKey is passed directly to the SDK, including when empty. Read credentials
-	// from the environment in the caller; Provider.APIKeyEnv is not consulted.
+	// APIKey overrides SDK defaults and option.WithAPIKey, including when empty.
+	// A nonempty key replaces an Authorization header supplied through Options;
+	// an empty key leaves that header intact. Read credentials from the environment
+	// in the caller; Provider.APIKeyEnv is not consulted.
 	APIKey string
 	// BaseURL is required and selects an API root, not a protocol.
 	// It must be an HTTP or HTTPS URL without userinfo, a query, or a fragment.
-	BaseURL    string
+	BaseURL string
+	// HTTPClient overrides option.WithHTTPClient when non-nil.
 	HTTPClient *http.Client
 
-	// Options may override credentials and HTTPClient or supply additional settings,
-	// such as organization and project. Config.BaseURL and WithMaxRetries(0)
-	// are applied last and cannot be overridden by Options.
+	// Options supply additional SDK settings, such as headers, organization, and
+	// project. APIKey, a non-nil HTTPClient, BaseURL, and WithMaxRetries(0) are
+	// applied afterward and take precedence over the corresponding SDK options.
 	Options []option.RequestOption
 }
 

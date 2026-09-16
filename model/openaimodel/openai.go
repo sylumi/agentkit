@@ -21,8 +21,8 @@ type openAIModel struct {
 
 // NewModel validates the base configuration and creates a model without sending
 // a request. The returned model supports independent concurrent calls. Options
-// are applied in this order: SDK environment defaults, Config.APIKey and
-// Config.HTTPClient, Config.Options, then Config.BaseURL and WithMaxRetries(0).
+// are applied in this order: SDK environment defaults, Config.Options,
+// Config.APIKey, a non-nil Config.HTTPClient, Config.BaseURL, and WithMaxRetries(0).
 // Options use SDK validation.
 // BaseURL changes the API root only; it does not switch to Chat Completions or
 // detect the endpoint's capabilities. Credentials supplied through Options are
@@ -33,15 +33,12 @@ func NewModel(cfg Config) (model.LLM, error) {
 		return nil, err
 	}
 	info := cfg.Model.Clone()
-	opts := []option.RequestOption{
-		// Apply even an empty key so another provider cannot inherit implicit
-		// OpenAI credentials. User Options can supply credentials afterward.
-		option.WithAPIKey(cfg.APIKey),
-	}
+	opts := append([]option.RequestOption(nil), cfg.Options...)
+	// Apply even an empty key to clear SDK defaults and option-supplied API keys.
+	opts = append(opts, option.WithAPIKey(cfg.APIKey))
 	if cfg.HTTPClient != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.HTTPClient))
 	}
-	opts = append(opts, cfg.Options...)
 	opts = append(opts, option.WithBaseURL(cfg.BaseURL), option.WithMaxRetries(0))
 	client := openai.NewClient(opts...)
 	return &openAIModel{client: &client, info: info}, nil
