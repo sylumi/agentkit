@@ -15,11 +15,10 @@ import (
 	"github.com/sylumi/agentkit/modelcatalog"
 )
 
-func TestModelConnectionDefaultsAndOverrides(t *testing.T) {
+func TestExplicitConnectionSettings(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "official-test-key")
 	t.Setenv("OPENAI_BASE_URL", "https://implicit.invalid/")
 	t.Setenv("OPENAI_CUSTOM_HEADERS", "")
-	t.Setenv("AGENTKIT_TEST_MISSING_KEY", "")
 	t.Setenv("AGENTKIT_TEST_GATEWAY_KEY", "gateway-test-key")
 	catalog, err := modelcatalog.Builtin()
 	if err != nil {
@@ -29,29 +28,43 @@ func TestModelConnectionDefaultsAndOverrides(t *testing.T) {
 	if !ok {
 		t.Fatal("missing builtin model")
 	}
-	custom := model.ModelInfo{ID: "custom-model", Provider: model.ProviderInfo{
+	custom := model.ModelInfo{ID: "custom-model", BaseURL: "https://model.invalid/v2", Provider: model.ProviderInfo{
 		ID: "gateway", BaseURL: "https://provider.invalid/v1/",
-		APIKeyEnv: []string{"AGENTKIT_TEST_MISSING_KEY", "AGENTKIT_TEST_GATEWAY_KEY"},
+		APIKeyEnv: []string{"AGENTKIT_TEST_GATEWAY_KEY"},
 	}}
 	for _, tc := range []struct {
-		name                           string
-		cfg                            openaimodel.Config
-		wantURL, wantKey, wantProvider string
+		name                            string
+		cfg                             openaimodel.Config
+		wantURL, wantAuth, wantProvider string
 	}{
 		{"builtin does not inherit SDK key", openaimodel.Config{Model: builtin, BaseURL: "https://api.openai.com/v1/"}, "https://api.openai.com/v1/responses", "", "openai"},
-		{"manual OpenAI", openaimodel.Config{Model: model.ModelInfo{ID: "manual", Provider: model.ProviderInfo{ID: "openai", BaseURL: "https://api.openai.com/v1/", APIKeyEnv: []string{"OPENAI_API_KEY"}}}}, "https://api.openai.com/v1/responses", "official-test-key", "openai"},
-		{"provider defaults", openaimodel.Config{Model: custom}, "https://provider.invalid/v1/responses", "gateway-test-key", "gateway"},
-		{"model URL", openaimodel.Config{Model: model.ModelInfo{ID: "custom-model", Provider: custom.Provider, BaseURL: "https://model.invalid/v2"}}, "https://model.invalid/v2/responses", "gateway-test-key", "gateway"},
-		{"explicit Config", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", APIKey: "explicit-test-key"}, "https://config.invalid/v3/responses", "explicit-test-key", "gateway"},
-		{"resolved URL overrides SDK option", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", APIKey: "explicit-test-key", Options: []option.RequestOption{
+		{"manual OpenAI", openaimodel.Config{Model: model.ModelInfo{ID: "manual", Provider: model.ProviderInfo{ID: "openai"}}, BaseURL: "https://api.openai.com/v1/", APIKey: "explicit-test-key"}, "https://api.openai.com/v1/responses", "Bearer explicit-test-key", "openai"},
+		{"metadata does not supply address or key", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3"}, "https://config.invalid/v3/responses", "", "gateway"},
+		{"explicit Config", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", APIKey: "explicit-test-key"}, "https://config.invalid/v3/responses", "Bearer explicit-test-key", "gateway"},
+		{"Config URL and key override SDK options", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", APIKey: "explicit-test-key", Options: []option.RequestOption{
 			option.WithBaseURL("https://options.invalid/v4"), option.WithAPIKey("option-test-key"),
-		}}, "https://config.invalid/v3/responses", "option-test-key", "gateway"},
-		{"provider URL overrides SDK option", openaimodel.Config{Model: custom, Options: []option.RequestOption{
-			option.WithBaseURL("https://options.invalid/v4"), option.WithAPIKey("option-test-key"),
-		}}, "https://provider.invalid/v1/responses", "option-test-key", "gateway"},
-		{"header auth", openaimodel.Config{Model: model.ModelInfo{ID: "custom-model", Provider: model.ProviderInfo{ID: "gateway", BaseURL: "https://headers.invalid/"}}, Options: []option.RequestOption{
+		}}, "https://config.invalid/v3/responses", "Bearer explicit-test-key", "gateway"},
+		{"empty Config key clears SDK option", openaimodel.Config{Model: custom, BaseURL: "https://config.invalid/v3", Options: []option.RequestOption{
+			option.WithAPIKey("option-test-key"),
+		}}, "https://config.invalid/v3/responses", "", "gateway"},
+		{"header auth", openaimodel.Config{Model: custom, BaseURL: "https://headers.invalid/", Options: []option.RequestOption{
 			option.WithHeader("Authorization", "Bearer header-test-key"),
-		}}, "https://headers.invalid/responses", "header-test-key", "gateway"},
+		}}, "https://headers.invalid/responses", "Bearer header-test-key", "gateway"},
+		{"custom header auth", openaimodel.Config{Model: custom, BaseURL: "https://headers.invalid/", Options: []option.RequestOption{
+			option.WithHeader("Authorization", "Basic dGVzdDp0ZXN0"),
+		}}, "https://headers.invalid/responses", "Basic dGVzdDp0ZXN0", "gateway"},
+		{"Config key overrides option key and header", openaimodel.Config{Model: custom, BaseURL: "https://headers.invalid/", APIKey: "explicit-test-key", Options: []option.RequestOption{
+			option.WithAPIKey("option-test-key"), option.WithHeader("Authorization", "Bearer header-test-key"),
+		}}, "https://headers.invalid/responses", "Bearer explicit-test-key", "gateway"},
+		{"Config key overrides header and option key", openaimodel.Config{Model: custom, BaseURL: "https://headers.invalid/", APIKey: "explicit-test-key", Options: []option.RequestOption{
+			option.WithHeader("Authorization", "Bearer header-test-key"), option.WithAPIKey("option-test-key"),
+		}}, "https://headers.invalid/responses", "Bearer explicit-test-key", "gateway"},
+		{"empty Config key preserves header after option key", openaimodel.Config{Model: custom, BaseURL: "https://headers.invalid/", Options: []option.RequestOption{
+			option.WithAPIKey("option-test-key"), option.WithHeader("Authorization", "Bearer header-test-key"),
+		}}, "https://headers.invalid/responses", "Bearer header-test-key", "gateway"},
+		{"empty Config key preserves header before option key", openaimodel.Config{Model: custom, BaseURL: "https://headers.invalid/", Options: []option.RequestOption{
+			option.WithHeader("Authorization", "Bearer header-test-key"), option.WithAPIKey("option-test-key"),
+		}}, "https://headers.invalid/responses", "Bearer header-test-key", "gateway"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
@@ -61,11 +74,7 @@ func TestModelConnectionDefaultsAndOverrides(t *testing.T) {
 				if r.URL.String() != tc.wantURL {
 					t.Error("URL precedence changed")
 				}
-				wantAuth := ""
-				if tc.wantKey != "" {
-					wantAuth = "Bearer " + tc.wantKey
-				}
-				if r.Header.Get("Authorization") != wantAuth {
+				if r.Header.Get("Authorization") != tc.wantAuth {
 					t.Error("credential precedence changed")
 				}
 				var request struct {
@@ -129,10 +138,11 @@ func TestCustomProviderDoesNotInheritOpenAICredentialsOrRouting(t *testing.T) {
 	for _, endpoint := range []string{"", "https://anonymous.invalid/"} {
 		calls := 0
 		m, err := openaimodel.NewModel(openaimodel.Config{
-			Model: model.ModelInfo{ID: "custom", Provider: model.ProviderInfo{ID: "custom", BaseURL: endpoint}},
+			Model:   model.ModelInfo{ID: "custom", Provider: model.ProviderInfo{ID: "custom"}},
+			BaseURL: endpoint,
 			HTTPClient: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
 				calls++
-				if endpoint == "" && (r.URL.Scheme != "" || r.URL.Host != "") || endpoint != "" && r.URL.Host != "anonymous.invalid" {
+				if r.URL.String() != "https://anonymous.invalid/responses" {
 					t.Error("inherited an unrelated endpoint")
 				}
 				if r.Header.Get("Authorization") != "" {
@@ -158,7 +168,7 @@ func TestCustomProviderDoesNotInheritOpenAICredentialsOrRouting(t *testing.T) {
 			}
 			failures++
 		}
-		if failures != 1 || calls > 1 {
+		if failures != 1 || calls != 1 {
 			t.Fatal("expected one connection failure without retries")
 		}
 	}
@@ -167,8 +177,9 @@ func TestCustomProviderDoesNotInheritOpenAICredentialsOrRouting(t *testing.T) {
 func TestCustomProviderFailureMetadata(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		m, err := openaimodel.NewModel(openaimodel.Config{
-			Model:  model.ModelInfo{ID: "custom", Provider: model.ProviderInfo{ID: "gateway", BaseURL: "https://example.invalid/"}},
-			APIKey: "test-key",
+			Model:   model.ModelInfo{ID: "custom", Provider: model.ProviderInfo{ID: "gateway"}},
+			BaseURL: "https://example.invalid/",
+			APIKey:  "test-key",
 			HTTPClient: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
 				r := wire{"id": "resp_failed", "model": "resolved-model", "status": "failed", "error": wire{"code": "server_error", "message": "failed"}}
 				body, contentType := responseBody(t, r), "application/json"

@@ -4,50 +4,36 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/openai/openai-go/v3/option"
 	"github.com/sylumi/agentkit/model"
 )
 
-// Config selects a model and optionally overrides its connection defaults.
+// Config selects a model and supplies its connection settings.
 // Model and provider IDs are supplied by the caller; Generate rejects an empty
-// model ID before I/O.
-// BaseURL is selected from Config, Model, then Model.Provider, and selects an
-// API root without userinfo, a query, or a fragment, not a protocol.
+// model ID before I/O. Connection metadata in ModelInfo is not used.
 type Config struct {
 	Model model.ModelInfo
 
-	// Empty strings leave these overrides unspecified. APIKey otherwise takes
-	// precedence over Model.Provider.APIKeyEnv, which is read at construction.
-	// A nil or empty APIKeyEnv disables environment lookup for every provider.
-	APIKey     string
-	BaseURL    string
+	// APIKey overrides SDK defaults and option.WithAPIKey, including when empty.
+	// A nonempty key replaces an Authorization header supplied through Options;
+	// an empty key leaves that header intact. Read credentials from the environment
+	// in the caller; Provider.APIKeyEnv is not consulted.
+	APIKey string
+	// BaseURL is required and selects an API root, not a protocol.
+	// It must be an HTTP or HTTPS URL without userinfo, a query, or a fragment.
+	BaseURL string
+	// HTTPClient overrides option.WithHTTPClient when non-nil.
 	HTTPClient *http.Client
 
-	// Options may override credentials and HTTPClient or supply additional settings,
-	// such as organization and project. The resolved BaseURL and WithMaxRetries(0)
-	// are applied last and cannot be overridden by Options.
+	// Options supply additional SDK settings, such as headers, organization, and
+	// project. APIKey, a non-nil HTTPClient, BaseURL, and WithMaxRetries(0) are
+	// applied afterward and take precedence over the corresponding SDK options.
 	Options []option.RequestOption
 }
 
 func normalizeConfig(cfg Config) (Config, error) {
-	p := cfg.Model.Provider
-	if cfg.APIKey == "" {
-		for _, name := range p.APIKeyEnv {
-			if value := os.Getenv(name); value != "" {
-				cfg.APIKey = value
-				break
-			}
-		}
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = cfg.Model.BaseURL
-	}
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = p.BaseURL
-	}
 	if cfg.BaseURL == "" {
 		return cfg, fmt.Errorf("openai: config.base_url: required")
 	}

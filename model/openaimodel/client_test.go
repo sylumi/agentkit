@@ -26,6 +26,7 @@ func TestClientConfigurationPrecedence(t *testing.T) {
 	for _, tc := range []struct {
 		name                          string
 		options                       []option.RequestOption
+		useOptionClient               bool
 		wantURL, wantKey              string
 		wantOrganization, wantProject string
 		wantHeader                    string
@@ -36,7 +37,7 @@ func TestClientConfigurationPrecedence(t *testing.T) {
 			wantOrganization: "env-org", wantProject: "env-project", wantHeader: "env-value",
 		},
 		{
-			name: "options cannot override resolved URL",
+			name: "Config fields override SDK options",
 			options: []option.RequestOption{
 				option.WithAPIKey("option-key"),
 				option.WithBaseURL("https://options.invalid/v2/"),
@@ -45,8 +46,14 @@ func TestClientConfigurationPrecedence(t *testing.T) {
 				option.WithProject("option-project"),
 				option.WithHeader("X-Test-Default", "option-value"),
 			},
-			wantURL: "https://configured.invalid/v1/responses", wantKey: "option-key",
+			wantURL: "https://configured.invalid/v1/responses", wantKey: "config-key",
 			wantOrganization: "option-org", wantProject: "option-project", wantHeader: "option-value",
+		},
+		{
+			name:            "nil Config client uses SDK option",
+			useOptionClient: true,
+			wantURL:         "https://configured.invalid/v1/responses", wantKey: "config-key",
+			wantOrganization: "env-org", wantProject: "env-project", wantHeader: "env-value",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,14 +90,20 @@ func TestClientConfigurationPrecedence(t *testing.T) {
 				}
 				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 			})}
-			options := append([]option.RequestOption{option.WithHTTPClient(client)}, tc.options...)
+			configClient := client
+			optionClient := &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("SDK option HTTP client should have been overridden")
+			})}
+			if tc.useOptionClient {
+				configClient = nil
+				optionClient = client
+			}
+			options := append([]option.RequestOption{option.WithHTTPClient(optionClient)}, tc.options...)
 			m, err := openaimodel.NewModel(openaimodel.Config{
 				Model: model.ModelInfo{ID: "test-model", Provider: model.ProviderInfo{ID: "openai"}}, APIKey: "config-key",
-				BaseURL: "https://configured.invalid/v1",
-				HTTPClient: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
-					return nil, errors.New("base HTTP client should have been overridden")
-				})},
-				Options: options,
+				BaseURL:    "https://configured.invalid/v1",
+				HTTPClient: configClient,
+				Options:    options,
 			})
 			if err != nil {
 				t.Fatal(err)
