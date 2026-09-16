@@ -21,8 +21,8 @@ type openAIModel struct {
 
 // NewModel validates the base configuration and creates a model without sending
 // a request. The returned model supports independent concurrent calls. Options
-// are applied in this order: SDK environment defaults, model/provider defaults,
-// Config fields, Config.Options, then the resolved BaseURL and WithMaxRetries(0).
+// are applied in this order: SDK environment defaults, Config.APIKey and
+// Config.HTTPClient, Config.Options, then Config.BaseURL and WithMaxRetries(0).
 // Options use SDK validation.
 // BaseURL changes the API root only; it does not switch to Chat Completions or
 // detect the endpoint's capabilities. Credentials supplied through Options are
