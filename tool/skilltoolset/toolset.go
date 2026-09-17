@@ -14,13 +14,24 @@ import (
 
 const defaultName = "SkillToolset"
 
-const defaultSystemInstruction = "Skills provide instructions and reference material for specialized tasks.\n" +
-	"The available_skills catalog below contains skill names and descriptions.\n" +
-	"Use `" + skilltool.ListName + "` to list the available skills.\n" +
-	"When a skill is relevant, call `" + skilltool.LoadName + "` with name=\"<skill name>\" to read its instructions before using it.\n" +
-	"Follow the loaded instructions within the task and the tools provided by the application.\n" +
-	"The load result includes resource paths. Read a needed resource using `" + skilltool.ResourceName + "` with name=\"<skill name>\" and path=\"<resource path>\".\n" +
-	"Resources are returned as text. Reading a script does not run it, and skill metadata does not grant tools or permissions.\n"
+const defaultSystemInstruction = `You can use specialized skills to help with complex tasks. Use the skill tools to discover and read these skills.
+
+Skills are folders of instructions and resources. Each skill folder contains:
+- **SKILL.md** (required): Skill metadata and detailed instructions.
+- **references/** (optional): Documentation and examples for using the skill.
+- **assets/** (optional): Templates and other supporting resources.
+- **scripts/** (optional): Scripts that can be read as text. Execution requires a separate tool provided by the application.
+
+The available_skills catalog below lists skill names and descriptions.
+
+Follow these rules:
+
+` +
+	"1. If a skill seems relevant to the current request, you MUST call `" + skilltool.LoadName + "` with name=\"<skill name>\" to read its full instructions before proceeding.\n" +
+	"2. Follow the loaded steps in order, within the current task and the tools provided by the application.\n" +
+	"3. The load result includes resource paths. Use `" + skilltool.ResourceName + "` with name=\"<skill name>\" and path=\"<resource path>\" to read a needed resource. Resources are returned as text; reading a script does not execute it.\n" +
+	"4. Use `" + skilltool.ListName + "` when you need to list the available skills.\n\n" +
+	"Skill metadata does not grant tools or permissions.\n"
 
 // Config selects the skill source and toolset options.
 type Config struct {
