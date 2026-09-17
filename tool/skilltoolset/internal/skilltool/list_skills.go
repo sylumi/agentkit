@@ -3,6 +3,7 @@ package skilltool
 
 import (
 	"context"
+	"encoding/xml"
 
 	"github.com/sylumi/agentkit/tool"
 	"github.com/sylumi/agentkit/tool/functiontool"
@@ -40,4 +41,21 @@ func listSkills(ctx context.Context, source skill.Source) (ListResult, error) {
 		result.Skills = append(result.Skills, Summary{Name: m.Name, Description: m.Description})
 	}
 	return result, nil
+}
+
+// SkillsToXML formats skill names and descriptions as an escaped catalog.
+func SkillsToXML(frontmatters []skill.Frontmatter) (string, error) {
+	type entry struct {
+		Name        string `xml:"name"`
+		Description string `xml:"description"`
+	}
+	catalog := struct {
+		XMLName xml.Name `xml:"available_skills"`
+		Skills  []entry  `xml:"skill"`
+	}{}
+	for _, fm := range frontmatters {
+		catalog.Skills = append(catalog.Skills, entry{Name: fm.Name, Description: fm.Description})
+	}
+	data, err := xml.MarshalIndent(catalog, "", "  ")
+	return string(data), err
 }

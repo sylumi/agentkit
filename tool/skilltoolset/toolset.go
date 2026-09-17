@@ -3,10 +3,10 @@ package skilltoolset
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
 	"slices"
 
+	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/tool"
 	"github.com/sylumi/agentkit/tool/skilltoolset/internal/skilltool"
 	"github.com/sylumi/agentkit/tool/skilltoolset/skill"
@@ -88,30 +88,24 @@ func New(cfg Config) (*Toolset, error) {
 	return ts, nil
 }
 
-// Instructions returns usage guidance and an escaped catalog of names and descriptions.
-// Add it to each model request. An empty catalog returns an empty string.
-func (ts *Toolset) Instructions(ctx context.Context) (string, error) {
+// ProcessRequest appends skill guidance and the catalog to the request.
+// Call once per request, after setting the application's base instructions.
+func (ts *Toolset) ProcessRequest(ctx context.Context, req *model.Request) error {
 	frontmatters, err := ts.source.ListFrontmatters(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if len(frontmatters) == 0 {
-		return "", nil
+		return nil
 	}
-	type entry struct {
-		Name        string `xml:"name"`
-		Description string `xml:"description"`
-	}
-	catalog := struct {
-		XMLName xml.Name `xml:"available_skills"`
-		Skills  []entry  `xml:"skill"`
-	}{}
-	for _, m := range frontmatters {
-		catalog.Skills = append(catalog.Skills, entry{Name: m.Name, Description: m.Description})
-	}
-	data, err := xml.MarshalIndent(catalog, "", "  ")
+	catalog, err := skilltool.SkillsToXML(frontmatters)
 	if err != nil {
-		return "", fmt.Errorf("skilltoolset: encode catalog: %w", err)
+		return fmt.Errorf("skilltoolset: encode catalog: %w", err)
 	}
-	return ts.systemInstruction + "\n" + string(data), nil
+	instructions := ts.systemInstruction + "\n" + catalog
+	if req.Instructions != "" {
+		instructions = req.Instructions + "\n\n" + instructions
+	}
+	req.Instructions = instructions
+	return nil
 }

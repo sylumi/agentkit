@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/tool/skilltoolset"
 	"github.com/sylumi/agentkit/tool/skilltoolset/skill"
 )
@@ -62,9 +63,10 @@ func TestToolsetCustomSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	instructions, err := ts.Instructions(t.Context())
-	if err != nil || !strings.Contains(instructions, "A &lt;custom&gt; skill") || strings.Contains(instructions, "BODY_MARKER") || strings.Contains(instructions, "RESOURCE_MARKER") {
-		t.Fatalf("catalog = %q, %v", instructions, err)
+	var req model.Request
+	err = ts.ProcessRequest(t.Context(), &req)
+	if err != nil || !strings.Contains(req.Instructions, "A &lt;custom&gt; skill") || strings.Contains(req.Instructions, "BODY_MARKER") || strings.Contains(req.Instructions, "RESOURCE_MARKER") {
+		t.Fatalf("catalog = %q, %v", req.Instructions, err)
 	}
 	tools, err := ts.Tools(t.Context())
 	if err != nil {
@@ -104,7 +106,7 @@ func TestToolsetSourceConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ts.Instructions(t.Context()); !errors.Is(err, skill.ErrDuplicateSkill) {
+	if err := ts.ProcessRequest(t.Context(), &model.Request{}); !errors.Is(err, skill.ErrDuplicateSkill) {
 		t.Fatalf("instructions did not detect duplicates: %v", err)
 	}
 	tools, err := ts.Tools(t.Context())

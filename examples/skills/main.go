@@ -48,7 +48,8 @@ func run() error {
 	defer cancel()
 
 	maxOutputTokens, thinking := int64(1024), false
-	req := model.Request{
+	baseRequest := model.Request{
+		Instructions: "Answer in English and use relevant skills before answering.",
 		Messages: []model.Message{{
 			Role: model.RoleUser,
 			Parts: []model.Part{model.NewTextPart(
@@ -67,16 +68,15 @@ func run() error {
 	registered := make(map[string]tool.Tool)
 	for _, t := range tools {
 		definition := t.Definition()
-		req.Tools = append(req.Tools, definition)
+		baseRequest.Tools = append(baseRequest.Tools, definition)
 		registered[definition.Name] = t
 	}
 
 	for turn := 1; turn <= 6; turn++ {
-		instructions, err := skills.Instructions(ctx)
-		if err != nil {
+		req := baseRequest
+		if err := skills.ProcessRequest(ctx, &req); err != nil {
 			return err
 		}
-		req.Instructions = "Answer in English and use relevant skills before answering.\n\n" + instructions
 
 		// Non-streaming calls emit one complete ResultEvent.
 		var result model.Result
@@ -114,7 +114,7 @@ func run() error {
 		if result.StopReason == model.StopReasonStop {
 			return nil
 		}
-		req.Messages = append(req.Messages, assistant)
+		baseRequest.Messages = append(baseRequest.Messages, assistant)
 
 		for _, part := range assistant.Parts {
 			if part.Kind != model.PartToolCall {
@@ -131,7 +131,7 @@ func run() error {
 				content = callErr.Error()
 			}
 			fmt.Printf("[result] %s\n\n", content)
-			req.Messages = append(req.Messages, model.Message{
+			baseRequest.Messages = append(baseRequest.Messages, model.Message{
 				Role: model.RoleTool,
 				Parts: []model.Part{{Kind: model.PartToolResult, ToolResult: &model.ToolResultPart{
 					CallID: call.ID, Content: content, IsError: callErr != nil,

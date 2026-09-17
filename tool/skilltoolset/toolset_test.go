@@ -32,13 +32,12 @@ func newToolset(t *testing.T) *skilltoolset.Toolset {
 func TestProgressiveSkillWorkflow(t *testing.T) {
 	skills := newToolset(t)
 	var ts tool.Toolset = skills
-	instructions, err := skills.Instructions(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 	req := model.Request{
-		Instructions: "You are a helpful assistant.\n" + instructions,
+		Instructions: "You are a helpful assistant.",
 		Messages:     []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("Please greet me.")}}},
+	}
+	if err := skills.ProcessRequest(t.Context(), &req); err != nil {
+		t.Fatal(err)
 	}
 	tools, err := ts.Tools(t.Context())
 	if err != nil {
@@ -103,7 +102,7 @@ func TestProgressiveSkillWorkflow(t *testing.T) {
 			}
 		}
 		// The same ordinary call/result messages can be passed to the next model
-		// turn. The toolset does not own call IDs or alter the request/history.
+		// turn. The toolset does not own call IDs or alter conversation history.
 		req.Messages = append(req.Messages,
 			model.Message{Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartToolCall, ToolCall: &call}}},
 			model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartToolResult, ToolResult: &model.ToolResultPart{CallID: call.ID, Content: content}}}},
@@ -152,8 +151,12 @@ func TestConstructionAndOwnership(t *testing.T) {
 	if files.reads != 0 {
 		t.Fatal("tool discovery read skill files")
 	}
-	if _, err := ts.Instructions(t.Context()); !errors.Is(err, fs.ErrPermission) {
+	req := model.Request{Instructions: "Keep these instructions."}
+	if err := ts.ProcessRequest(t.Context(), &req); !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("filesystem error lost: %v", err)
+	}
+	if req.Instructions != "Keep these instructions." {
+		t.Fatal("failed processing changed the request")
 	}
 }
 
@@ -162,7 +165,7 @@ func TestConcurrentToolCalls(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 12 {
 		wg.Go(func() {
-			if _, err := ts.Instructions(t.Context()); err != nil {
+			if err := ts.ProcessRequest(t.Context(), &model.Request{}); err != nil {
 				t.Error(err)
 			}
 			tools, err := ts.Tools(t.Context())
@@ -180,8 +183,12 @@ func TestConcurrentToolCalls(t *testing.T) {
 	wg.Wait()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := ts.Instructions(ctx); !errors.Is(err, context.Canceled) {
+	req := model.Request{Instructions: "Keep these instructions."}
+	if err := ts.ProcessRequest(ctx, &req); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+	if req.Instructions != "Keep these instructions." {
+		t.Fatal("canceled processing changed the request")
 	}
 }
 
