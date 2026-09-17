@@ -1,47 +1,85 @@
-// Package skilltoolset exposes skill discovery, instruction loading, and text
-// resource reading as ordinary tools. Callers add Instructions to each model
-// request and dispatch tool calls using the tools returned by Tools.
+// Package skilltoolset provides skill tools and model instructions.
 package skilltoolset
 
 import (
 	"context"
-	"encoding/xml"
 	"fmt"
-	"io/fs"
 	"slices"
 
+	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/tool"
 	"github.com/sylumi/agentkit/tool/skilltoolset/internal/skilltool"
 	"github.com/sylumi/agentkit/tool/skilltoolset/skill"
 )
 
-// Config selects a filesystem whose immediate subdirectories contain skills.
-// The caller owns its lifetime. For local files requiring filesystem confinement,
-// pass an os.Root's FS and keep the root open while the toolset is in use.
+const defaultName = "SkillToolset"
+
+const defaultSystemInstruction = `You can use specialized skills to help with complex tasks. Use the skill tools to discover and read these skills.
+
+Skills are folders of instructions and resources. Each skill folder contains:
+- **SKILL.md** (required): Skill metadata and detailed instructions.
+- **references/** (optional): Documentation and examples for using the skill.
+- **assets/** (optional): Templates and other supporting resources.
+- **scripts/** (optional): Scripts that can be read as text. Execution requires a separate tool provided by the application.
+
+The available_skills catalog below lists skill names and descriptions.
+
+Follow these rules:
+
+` +
+	"1. If a skill seems relevant to the current request, you MUST call `" + skilltool.LoadName + "` with name=\"<skill name>\" to read its full instructions before proceeding.\n" +
+	"2. Follow the loaded steps in order, within the current task and the tools provided by the application.\n" +
+	"3. The load result includes resource paths. Use `" + skilltool.ResourceName + "` with name=\"<skill name>\" and path=\"<resource path>\" to read a needed resource. Resources are returned as text; reading a script does not execute it.\n" +
+	"4. Use `" + skilltool.ListName + "` when you need to list the available skills.\n\n" +
+	"Skill metadata does not grant tools or permissions.\n"
+
+// Config selects the skill source and toolset options.
 type Config struct {
-	FS fs.FS
+	Source skill.Source
+	// Name defaults to "SkillToolset".
+	Name string
+	// SystemInstruction replaces the default guidance when non-empty.
+	SystemInstruction string
 }
 
-// Toolset groups three tools and the instructions needed to discover skills.
-// It has no per-session state and supports concurrent calls when its filesystem
-// does. It does not register itself with a model or execute a skill's workflow.
+// Toolset groups skill tools and instructions for model requests.
 type Toolset struct {
-	filesystem *skill.FileSystem
-	tools      []tool.Tool
+	name              string
+	source            skill.Source
+	tools             []tool.Tool
+	systemInstruction string
 }
 
-// New constructs the tools without reading the filesystem or making model calls.
-func New(cfg Config) (*Toolset, error) {
-	filesystem, err := skill.NewFileSystem(cfg.FS)
-	if err != nil {
-		return nil, fmt.Errorf("skilltoolset: %w", err)
+func (ts *Toolset) Name() string { return ts.name }
+
+func (ts *Toolset) Tools(ctx context.Context) ([]tool.Tool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	constructors := []func(*skill.FileSystem) (tool.Tool, error){
+	return slices.Clone(ts.tools), nil
+}
+
+// New constructs the tools without reading skill content.
+func New(cfg Config) (*Toolset, error) {
+	if cfg.Source == nil {
+		return nil, fmt.Errorf("skilltoolset: source is required")
+	}
+	if cfg.Name == "" {
+		cfg.Name = defaultName
+	}
+	if cfg.SystemInstruction == "" {
+		cfg.SystemInstruction = defaultSystemInstruction
+	}
+	constructors := []func(skill.Source) (tool.Tool, error){
 		skilltool.ListSkills, skilltool.LoadSkill, skilltool.LoadSkillResource,
 	}
-	ts := &Toolset{filesystem: filesystem}
+	ts := &Toolset{
+		name:              cfg.Name,
+		source:            cfg.Source,
+		systemInstruction: cfg.SystemInstruction,
+	}
 	for _, newTool := range constructors {
-		t, err := newTool(filesystem)
+		t, err := newTool(cfg.Source)
 		if err != nil {
 			return nil, fmt.Errorf("skilltoolset: create tool: %w", err)
 		}
@@ -50,44 +88,24 @@ func New(cfg Config) (*Toolset, error) {
 	return ts, nil
 }
 
-// Tools returns list_skills, load_skill, and load_skill_resource, in that order.
-// The slice is independent; tool implementations are shared and immutable.
-func (ts *Toolset) Tools() []tool.Tool { return slices.Clone(ts.tools) }
-
-const skillInstructions = "Skills provide instructions and reference material for specialized tasks.\n" +
-	"The available_skills catalog below contains skill names and descriptions.\n" +
-	"Use `" + skilltool.ListName + "` to list the available skills.\n" +
-	"When a skill is relevant, call `" + skilltool.LoadName + "` with name=\"<skill name>\" to read its instructions before using it.\n" +
-	"Follow the loaded instructions within the task and the tools provided by the application.\n" +
-	"The load result includes resource paths. Read a needed resource using `" + skilltool.ResourceName + "` with name=\"<skill name>\" and path=\"<resource path>\".\n" +
-	"Resources are returned as text. Reading a script does not run it, and skill metadata does not grant tools or permissions.\n"
-
-// Instructions returns usage guidance and an escaped, sorted catalog containing
-// only names and descriptions. No skill bodies or resource contents are included.
-// An empty catalog returns an empty string. Combine this with the application's
-// base instructions when building each Request, before starting Generate.
-func (ts *Toolset) Instructions(ctx context.Context) (string, error) {
-	frontmatters, err := ts.filesystem.List(ctx)
+// ProcessRequest appends skill guidance and the catalog to the request.
+// Call once per request, after setting the application's base instructions.
+func (ts *Toolset) ProcessRequest(ctx context.Context, req *model.Request) error {
+	frontmatters, err := ts.source.ListFrontmatters(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if len(frontmatters) == 0 {
-		return "", nil
+		return nil
 	}
-	type entry struct {
-		Name        string `xml:"name"`
-		Description string `xml:"description"`
-	}
-	catalog := struct {
-		XMLName xml.Name `xml:"available_skills"`
-		Skills  []entry  `xml:"skill"`
-	}{}
-	for _, m := range frontmatters {
-		catalog.Skills = append(catalog.Skills, entry{Name: m.Name, Description: m.Description})
-	}
-	data, err := xml.MarshalIndent(catalog, "", "  ")
+	catalog, err := skilltool.SkillsToXML(frontmatters)
 	if err != nil {
-		return "", fmt.Errorf("skilltoolset: encode catalog: %w", err)
+		return fmt.Errorf("skilltoolset: encode catalog: %w", err)
 	}
-	return skillInstructions + "\n" + string(data), nil
+	instructions := ts.systemInstruction + "\n" + catalog
+	if req.Instructions != "" {
+		instructions = req.Instructions + "\n\n" + instructions
+	}
+	req.Instructions = instructions
+	return nil
 }

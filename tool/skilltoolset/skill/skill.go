@@ -1,18 +1,7 @@
-// Package skill reads agent skill instructions and resources independently of
-// model calls. Skills are immediate subdirectories containing a SKILL.md file.
+// Package skill defines skills and their content sources.
 package skill
 
-import "errors"
-
-var (
-	ErrInvalidSkill = errors.New("skill: invalid skill")
-	ErrNotFound     = errors.New("skill: not found")
-	ErrInvalidPath  = errors.New("skill: invalid path")
-	ErrTooLarge     = errors.New("skill: file too large")
-)
-
-// Frontmatter contains the YAML header of SKILL.md. AllowedTools is descriptive metadata;
-// loading a skill does not grant permissions or register additional tools.
+// Frontmatter contains the SKILL.md YAML header. AllowedTools is descriptive only.
 type Frontmatter struct {
 	Name          string            `json:"name" yaml:"name"`
 	Description   string            `json:"description" yaml:"description"`
@@ -22,9 +11,7 @@ type Frontmatter struct {
 	AllowedTools  []string          `json:"allowed-tools,omitempty" yaml:"-"`
 }
 
-// Skill contains instructions and resource paths relative to its directory.
-// Resource contents are read separately, on demand. Values returned by the
-// filesystem reader are independent and may be modified by the caller.
+// Skill contains frontmatter, instructions, and relative resource paths.
 type Skill struct {
 	Frontmatter  Frontmatter `json:"frontmatter"`
 	Instructions string      `json:"instructions"`

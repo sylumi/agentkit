@@ -19,12 +19,9 @@ func (f *unreadableFS) Open(string) (fs.File, error) { f.calls++; return nil, fs
 
 func TestBadArgumentsFailBeforeFileAccess(t *testing.T) {
 	files := &unreadableFS{}
-	reader, err := skill.NewFileSystem(files)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reader := skill.NewFileSystemSource(files)
 	for _, tc := range []struct {
-		newTool func(*skill.FileSystem) (tool.Tool, error)
+		newTool func(skill.Source) (tool.Tool, error)
 		inputs  []string
 	}{
 		{skilltool.ListSkills, []string{`null`, `[]`, `{"name":"demo"}`, `{} {}`}},
@@ -55,15 +52,12 @@ func TestBadArgumentsFailBeforeFileAccess(t *testing.T) {
 }
 
 func TestToolErrorsPreserveCauses(t *testing.T) {
-	reader, err := skill.NewFileSystem(fstest.MapFS{"demo/SKILL.md": {Data: []byte("---\nname: demo\ndescription: Demo\n---\nInstructions")}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	reader := skill.NewFileSystemSource(fstest.MapFS{"demo/SKILL.md": {Data: []byte("---\nname: demo\ndescription: Demo\n---\nInstructions")}})
 	load, err := skilltool.LoadSkill(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := load.Execute(t.Context(), json.RawMessage(`{"name":"missing"}`)); !errors.Is(err, skill.ErrNotFound) || !errors.Is(err, fs.ErrNotExist) {
+	if _, err := load.Execute(t.Context(), json.RawMessage(`{"name":"missing"}`)); !errors.Is(err, skill.ErrSkillNotFound) || !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("missing skill error = %v", err)
 	}
 	resource, err := skilltool.LoadSkillResource(reader)

@@ -18,10 +18,11 @@ import (
 
 func newToolset(t *testing.T) *skilltoolset.Toolset {
 	t.Helper()
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: fstest.MapFS{
+	source := skill.NewFileSystemSource(fstest.MapFS{
 		"greeting/SKILL.md":                {Data: []byte("---\nname: greeting\ndescription: Greet someone\nmetadata:\n  owner: team\n---\nBODY_MARKER: Read references/greeting.txt.\n")},
 		"greeting/references/greeting.txt": {Data: []byte("RESOURCE_MARKER: Hello!")},
-	}})
+	})
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,17 +30,21 @@ func newToolset(t *testing.T) *skilltoolset.Toolset {
 }
 
 func TestProgressiveSkillWorkflow(t *testing.T) {
-	ts := newToolset(t)
-	instructions, err := ts.Instructions(t.Context())
+	skills := newToolset(t)
+	var ts tool.Toolset = skills
+	req := model.Request{
+		Instructions: "You are a helpful assistant.",
+		Messages:     []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("Please greet me.")}}},
+	}
+	if err := skills.ProcessRequest(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	tools, err := ts.Tools(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := model.Request{
-		Instructions: "You are a helpful assistant.\n" + instructions,
-		Messages:     []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("Please greet me.")}}},
-	}
 	registered := map[string]tool.Tool{}
-	for _, implementation := range ts.Tools() {
+	for _, implementation := range tools {
 		definition := implementation.Definition()
 		req.Tools = append(req.Tools, definition)
 		registered[definition.Name] = implementation
@@ -97,7 +102,7 @@ func TestProgressiveSkillWorkflow(t *testing.T) {
 			}
 		}
 		// The same ordinary call/result messages can be passed to the next model
-		// turn. The toolset does not own call IDs or alter the request/history.
+		// turn. The toolset does not own call IDs or alter conversation history.
 		req.Messages = append(req.Messages,
 			model.Message{Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartToolCall, ToolCall: &call}}},
 			model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartToolResult, ToolResult: &model.ToolResultPart{CallID: call.ID, Content: content}}}},
@@ -117,23 +122,41 @@ func (f *unavailableFS) Open(string) (fs.File, error) { f.reads++; return nil, f
 
 func TestConstructionAndOwnership(t *testing.T) {
 	if _, err := skilltoolset.New(skilltoolset.Config{}); err == nil {
-		t.Fatal("accepted nil filesystem")
+		t.Fatal("accepted nil source")
 	}
 	files := &unavailableFS{}
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: files})
+	source := skill.NewFileSystemSource(files)
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: source})
 	if err != nil || files.reads != 0 {
 		t.Fatalf("constructor read files: %v, %d", err, files.reads)
 	}
-	returned := ts.Tools()
+	if ts.Name() != "SkillToolset" {
+		t.Fatalf("default name = %q", ts.Name())
+	}
+	returned, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(returned) != 3 {
 		t.Fatalf("tool count = %d", len(returned))
 	}
 	returned[0] = nil
-	if ts.Tools()[0] == nil {
+	again, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 3 || again[0] == nil {
 		t.Fatal("tool slice aliases internal storage")
 	}
-	if _, err := ts.Instructions(t.Context()); !errors.Is(err, fs.ErrPermission) {
+	if files.reads != 0 {
+		t.Fatal("tool discovery read skill files")
+	}
+	req := model.Request{Instructions: "Keep these instructions."}
+	if err := ts.ProcessRequest(t.Context(), &req); !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("filesystem error lost: %v", err)
+	}
+	if req.Instructions != "Keep these instructions." {
+		t.Fatal("failed processing changed the request")
 	}
 }
 
@@ -142,11 +165,16 @@ func TestConcurrentToolCalls(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 12 {
 		wg.Go(func() {
-			if _, err := ts.Instructions(t.Context()); err != nil {
+			if err := ts.ProcessRequest(t.Context(), &model.Request{}); err != nil {
 				t.Error(err)
 			}
+			tools, err := ts.Tools(t.Context())
+			if err != nil {
+				t.Error(err)
+				return
+			}
 			for i, args := range []string{`{}`, `{"name":"greeting"}`, `{"name":"greeting","path":"references/greeting.txt"}`} {
-				if _, err := ts.Tools()[i].Execute(t.Context(), json.RawMessage(args)); err != nil {
+				if _, err := tools[i].Execute(t.Context(), json.RawMessage(args)); err != nil {
 					t.Error(err)
 				}
 			}
@@ -155,7 +183,25 @@ func TestConcurrentToolCalls(t *testing.T) {
 	wg.Wait()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := ts.Instructions(ctx); !errors.Is(err, context.Canceled) {
+	req := model.Request{Instructions: "Keep these instructions."}
+	if err := ts.ProcessRequest(ctx, &req); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+	if req.Instructions != "Keep these instructions." {
+		t.Fatal("canceled processing changed the request")
+	}
+}
+
+func TestToolsCancellation(t *testing.T) {
+	var ts tool.Toolset = newToolset(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	tools, err := ts.Tools(ctx)
+	if !errors.Is(err, context.Canceled) || len(tools) != 0 {
+		t.Fatalf("canceled discovery returned %d tools, error = %v", len(tools), err)
+	}
+	tools, err = ts.Tools(t.Context())
+	if err != nil || len(tools) != 3 {
+		t.Fatalf("fresh discovery returned %d tools, error = %v", len(tools), err)
 	}
 }

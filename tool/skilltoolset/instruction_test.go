@@ -7,22 +7,26 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/tool/skilltoolset"
+	"github.com/sylumi/agentkit/tool/skilltoolset/skill"
 )
 
-func TestInstructionsCatalogEscapingAndOrdering(t *testing.T) {
+func TestProcessRequestCatalogEscapingAndOrdering(t *testing.T) {
 	const description = `Compare <one> & "two"; </description><skill> is literal text.`
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: fstest.MapFS{
+	source := skill.NewFileSystemSource(fstest.MapFS{
 		"zeta/SKILL.md":  {Data: []byte("---\nname: zeta\ndescription: Zeta\n---\nHidden body")},
 		"alpha/SKILL.md": {Data: []byte("---\nname: alpha\ndescription: '" + description + "'\n---\nHidden body")},
-	}})
+	})
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, err := ts.Instructions(t.Context())
-	if err != nil {
+	var req model.Request
+	if err := ts.ProcessRequest(t.Context(), &req); err != nil {
 		t.Fatal(err)
 	}
+	text := req.Instructions
 	start := strings.Index(text, "<available_skills>")
 	if start < 0 {
 		t.Fatal("missing catalog")
@@ -42,19 +46,24 @@ func TestInstructionsCatalogEscapingAndOrdering(t *testing.T) {
 	if strings.Contains(text, "Hidden body") {
 		t.Fatal("catalog includes skill body")
 	}
-	again, err := ts.Instructions(t.Context())
-	if err != nil || again != text {
+	var again model.Request
+	if err := ts.ProcessRequest(t.Context(), &again); err != nil || again.Instructions != text {
 		t.Fatalf("instructions accumulated across calls: %v", err)
 	}
 }
 
 func TestInstructionsMatchToolParameters(t *testing.T) {
 	ts := newToolset(t)
-	text, err := ts.Instructions(t.Context())
+	var req model.Request
+	if err := ts.ProcessRequest(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	text := req.Instructions
+	tools, err := ts.Tools(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, implementation := range ts.Tools() {
+	for _, implementation := range tools {
 		definition := implementation.Definition()
 		if !strings.Contains(text, "`"+definition.Name+"`") {
 			t.Errorf("instructions omit %s", definition.Name)
@@ -81,15 +90,122 @@ func TestInstructionsMatchToolParameters(t *testing.T) {
 }
 
 func TestEmptyCatalog(t *testing.T) {
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: fstest.MapFS{}})
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: skill.NewFileSystemSource(fstest.MapFS{})})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text, err := ts.Instructions(t.Context()); err != nil || text != "" {
-		t.Fatalf("empty instructions = %q, %v", text, err)
+	for _, base := range []string{"", "Keep these instructions."} {
+		req := model.Request{Instructions: base}
+		if err := ts.ProcessRequest(t.Context(), &req); err != nil || req.Instructions != base {
+			t.Fatalf("empty catalog changed instructions: %q, %v", req.Instructions, err)
+		}
 	}
-	content, err := ts.Tools()[0].Execute(t.Context(), json.RawMessage(`{}`))
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := tools[0].Execute(t.Context(), json.RawMessage(`{}`))
 	if err != nil || content != `{"skills":[]}` {
 		t.Fatalf("empty list = %q, %v", content, err)
+	}
+}
+
+func TestCustomConfiguration(t *testing.T) {
+	const guidance = "Load a relevant skill before answering."
+	ts, err := skilltoolset.New(skilltoolset.Config{
+		Source:            memorySource{},
+		Name:              "ProjectSkills",
+		SystemInstruction: guidance,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts.Name() != "ProjectSkills" {
+		t.Fatalf("custom name = %q", ts.Name())
+	}
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"list_skills", "load_skill", "load_skill_resource"} {
+		if got := tools[i].Definition().Name; got != want {
+			t.Fatalf("tool name = %q, want %q", got, want)
+		}
+	}
+	var req model.Request
+	if err := ts.ProcessRequest(t.Context(), &req); err != nil {
+		t.Fatal(err)
+	}
+	text := req.Instructions
+	prefix, catalog, found := strings.Cut(text, "<available_skills>")
+	if !found || prefix != guidance+"\n" {
+		t.Fatalf("custom guidance = %q", text)
+	}
+	var decoded struct {
+		Skills []struct {
+			Name        string `xml:"name"`
+			Description string `xml:"description"`
+		} `xml:"skill"`
+	}
+	if err := xml.Unmarshal([]byte("<available_skills>"+catalog), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Skills) != 1 || decoded.Skills[0].Name != "demo" || decoded.Skills[0].Description != "A <custom> skill" {
+		t.Fatalf("custom guidance changed the catalog: %+v", decoded)
+	}
+	var again model.Request
+	if err := ts.ProcessRequest(t.Context(), &again); err != nil || again.Instructions != text {
+		t.Fatalf("custom instructions accumulated across calls: %v", err)
+	}
+	empty, err := skilltoolset.New(skilltoolset.Config{Source: skill.NewFileSystemSource(fstest.MapFS{}), SystemInstruction: guidance})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyReq := model.Request{Instructions: "Keep these instructions."}
+	if err := empty.ProcessRequest(t.Context(), &emptyReq); err != nil || emptyReq.Instructions != "Keep these instructions." {
+		t.Fatalf("empty catalog with custom guidance = %q, %v", emptyReq.Instructions, err)
+	}
+}
+
+func TestProcessRequestPreservesBaseRequest(t *testing.T) {
+	ts := newToolset(t)
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxOutputTokens := int64(128)
+	base := model.Request{
+		Instructions: "Answer briefly.",
+		Messages:     []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("Welcome Maya.")}}},
+		Tools:        []model.ToolDefinition{tools[0].Definition()},
+		Config:       &model.GenerateConfig{MaxOutputTokens: &maxOutputTokens},
+	}
+	before, err := json.Marshal(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first string
+	for range 2 {
+		req := base
+		if err := ts.ProcessRequest(t.Context(), &req); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(req.Instructions, base.Instructions+"\n\n") || strings.Count(req.Instructions, "<available_skills>") != 1 {
+			t.Fatalf("base instructions or catalog changed: %q", req.Instructions)
+		}
+		if first == "" {
+			first = req.Instructions
+		} else if req.Instructions != first {
+			t.Fatal("instructions accumulated across requests")
+		}
+		req.Instructions = base.Instructions
+		after, err := json.Marshal(req)
+		if err != nil || string(after) != string(before) {
+			t.Fatalf("request fields changed: %s, error = %v", after, err)
+		}
+	}
+	after, err := json.Marshal(base)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("base request changed: %s, error = %v", after, err)
 	}
 }
