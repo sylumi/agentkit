@@ -39,6 +39,16 @@ func Lookup(providerID, modelID string) (model.ModelInfo, error) {
 	return info, nil
 }
 
+// MustLookup returns model metadata, panicking if Lookup fails.
+// Use it for fixed model IDs in application configuration.
+func MustLookup(providerID, modelID string) model.ModelInfo {
+	info, err := Lookup(providerID, modelID)
+	if err != nil {
+		panic(err)
+	}
+	return info
+}
+
 // List returns independent copies from the built-in catalog, ordered by provider
 // ID and model ID. An empty providerID selects all providers; no matches returns
 // an empty list. A loading failure is returned as an error.
