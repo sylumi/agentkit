@@ -20,18 +20,24 @@ type ListResult struct {
 	Skills []Summary `json:"skills"`
 }
 
-func ListSkills(filesystem *skill.FileSystem) (tool.Tool, error) {
-	return functiontool.New(functiontool.Config{
-		Name: ListName, Description: "List available skills with their names and descriptions.",
-	}, func(ctx context.Context, _ struct{}) (ListResult, error) {
-		frontmatters, err := filesystem.List(ctx)
-		if err != nil {
-			return ListResult{}, err
-		}
-		result := ListResult{Skills: []Summary{}}
-		for _, m := range frontmatters {
-			result.Skills = append(result.Skills, Summary{Name: m.Name, Description: m.Description})
-		}
-		return result, nil
-	})
+func ListSkills(source skill.Source) (tool.Tool, error) {
+	return functiontool.New(
+		functiontool.Config{
+			Name:        ListName,
+			Description: "List available skills with their names and descriptions.",
+		}, func(ctx context.Context, _ struct{}) (ListResult, error) {
+			return listSkills(ctx, source)
+		})
+}
+
+func listSkills(ctx context.Context, source skill.Source) (ListResult, error) {
+	frontmatters, err := source.ListFrontmatters(ctx)
+	if err != nil {
+		return ListResult{}, err
+	}
+	result := ListResult{Skills: []Summary{}}
+	for _, m := range frontmatters {
+		result.Skills = append(result.Skills, Summary{Name: m.Name, Description: m.Description})
+	}
+	return result, nil
 }

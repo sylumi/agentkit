@@ -8,14 +8,16 @@ import (
 	"testing/fstest"
 
 	"github.com/sylumi/agentkit/tool/skilltoolset"
+	"github.com/sylumi/agentkit/tool/skilltoolset/skill"
 )
 
 func TestInstructionsCatalogEscapingAndOrdering(t *testing.T) {
 	const description = `Compare <one> & "two"; </description><skill> is literal text.`
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: fstest.MapFS{
+	source := skill.NewFileSystemSource(fstest.MapFS{
 		"zeta/SKILL.md":  {Data: []byte("---\nname: zeta\ndescription: Zeta\n---\nHidden body")},
 		"alpha/SKILL.md": {Data: []byte("---\nname: alpha\ndescription: '" + description + "'\n---\nHidden body")},
-	}})
+	})
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +83,7 @@ func TestInstructionsMatchToolParameters(t *testing.T) {
 }
 
 func TestEmptyCatalog(t *testing.T) {
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: fstest.MapFS{}})
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: skill.NewFileSystemSource(fstest.MapFS{})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,5 +93,56 @@ func TestEmptyCatalog(t *testing.T) {
 	content, err := ts.Tools()[0].Execute(t.Context(), json.RawMessage(`{}`))
 	if err != nil || content != `{"skills":[]}` {
 		t.Fatalf("empty list = %q, %v", content, err)
+	}
+}
+
+func TestCustomConfiguration(t *testing.T) {
+	const guidance = "Load a relevant skill before answering."
+	ts, err := skilltoolset.New(skilltoolset.Config{
+		Source:            memorySource{},
+		Name:              "ProjectSkills",
+		SystemInstruction: guidance,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts.Name() != "ProjectSkills" {
+		t.Fatalf("custom name = %q", ts.Name())
+	}
+	for i, want := range []string{"list_skills", "load_skill", "load_skill_resource"} {
+		if got := ts.Tools()[i].Definition().Name; got != want {
+			t.Fatalf("tool name = %q, want %q", got, want)
+		}
+	}
+	text, err := ts.Instructions(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, catalog, found := strings.Cut(text, "<available_skills>")
+	if !found || prefix != guidance+"\n" {
+		t.Fatalf("custom guidance = %q", text)
+	}
+	var decoded struct {
+		Skills []struct {
+			Name        string `xml:"name"`
+			Description string `xml:"description"`
+		} `xml:"skill"`
+	}
+	if err := xml.Unmarshal([]byte("<available_skills>"+catalog), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Skills) != 1 || decoded.Skills[0].Name != "demo" || decoded.Skills[0].Description != "A <custom> skill" {
+		t.Fatalf("custom guidance changed the catalog: %+v", decoded)
+	}
+	again, err := ts.Instructions(t.Context())
+	if err != nil || again != text {
+		t.Fatalf("custom instructions accumulated across calls: %v", err)
+	}
+	empty, err := skilltoolset.New(skilltoolset.Config{Source: skill.NewFileSystemSource(fstest.MapFS{}), SystemInstruction: guidance})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text, err := empty.Instructions(t.Context()); err != nil || text != "" {
+		t.Fatalf("empty catalog with custom guidance = %q, %v", text, err)
 	}
 }

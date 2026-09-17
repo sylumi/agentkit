@@ -14,9 +14,8 @@ import (
 
 const maxSkillBytes = 256 << 10
 
-// Parse reads one SKILL.md document, preserving the Markdown body verbatim.
-// Resources are populated by FileSystem.Load, not by parsing. Both LF and CRLF
-// delimiters are accepted. Documents larger than 256 KiB are rejected.
+// Parse reads a SKILL.md document of at most 256 KiB, preserving its Markdown body.
+// Resource paths are loaded separately through Source.ListResources.
 func Parse(data []byte) (Skill, error) {
 	if len(data) > maxSkillBytes {
 		return Skill{}, fmt.Errorf("%w: SKILL.md exceeds %d bytes", ErrTooLarge, maxSkillBytes)
@@ -58,8 +57,7 @@ func parseFrontmatter(r *bufio.Reader) (Frontmatter, error) {
 		}
 		header.WriteString(line)
 	}
-	// Use a node for allowed-tools: the specification uses a scalar, while some
-	// skill authors use a YAML sequence. Unknown frontmatter fields are ignored.
+	// allowed-tools accepts a string or sequence; unknown fields are ignored.
 	var wire struct {
 		Name          yamlText            `yaml:"name"`
 		Description   yamlText            `yaml:"description"`
@@ -118,8 +116,7 @@ func parseFrontmatter(r *bufio.Reader) (Frontmatter, error) {
 	return frontmatter, nil
 }
 
-// YAML otherwise coerces numbers and booleans into Go strings. Frontmatter text
-// should retain the author's declared type, including strings reached by aliases.
+// yamlText prevents YAML numbers and booleans from being coerced into strings.
 type yamlText string
 
 func (s *yamlText) UnmarshalYAML(node *yaml.Node) error {

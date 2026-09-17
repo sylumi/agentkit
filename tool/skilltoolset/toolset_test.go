@@ -18,10 +18,11 @@ import (
 
 func newToolset(t *testing.T) *skilltoolset.Toolset {
 	t.Helper()
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: fstest.MapFS{
+	source := skill.NewFileSystemSource(fstest.MapFS{
 		"greeting/SKILL.md":                {Data: []byte("---\nname: greeting\ndescription: Greet someone\nmetadata:\n  owner: team\n---\nBODY_MARKER: Read references/greeting.txt.\n")},
 		"greeting/references/greeting.txt": {Data: []byte("RESOURCE_MARKER: Hello!")},
-	}})
+	})
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,12 +118,16 @@ func (f *unavailableFS) Open(string) (fs.File, error) { f.reads++; return nil, f
 
 func TestConstructionAndOwnership(t *testing.T) {
 	if _, err := skilltoolset.New(skilltoolset.Config{}); err == nil {
-		t.Fatal("accepted nil filesystem")
+		t.Fatal("accepted nil source")
 	}
 	files := &unavailableFS{}
-	ts, err := skilltoolset.New(skilltoolset.Config{FS: files})
+	source := skill.NewFileSystemSource(files)
+	ts, err := skilltoolset.New(skilltoolset.Config{Source: source})
 	if err != nil || files.reads != 0 {
 		t.Fatalf("constructor read files: %v, %d", err, files.reads)
+	}
+	if ts.Name() != "SkillToolset" {
+		t.Fatalf("default name = %q", ts.Name())
 	}
 	returned := ts.Tools()
 	if len(returned) != 3 {
