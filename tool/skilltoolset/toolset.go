@@ -67,11 +67,11 @@ const skillInstructions = "Skills provide instructions and reference material fo
 // An empty catalog returns an empty string. Combine this with the application's
 // base instructions when building each Request, before starting Generate.
 func (ts *Toolset) Instructions(ctx context.Context) (string, error) {
-	metadata, err := ts.filesystem.List(ctx)
+	frontmatters, err := ts.filesystem.List(ctx)
 	if err != nil {
 		return "", err
 	}
-	if len(metadata) == 0 {
+	if len(frontmatters) == 0 {
 		return "", nil
 	}
 	type entry struct {
@@ -82,7 +82,7 @@ func (ts *Toolset) Instructions(ctx context.Context) (string, error) {
 		XMLName xml.Name `xml:"available_skills"`
 		Skills  []entry  `xml:"skill"`
 	}{}
-	for _, m := range metadata {
+	for _, m := range frontmatters {
 		catalog.Skills = append(catalog.Skills, entry{Name: m.Name, Description: m.Description})
 	}
 	data, err := xml.MarshalIndent(catalog, "", "  ")

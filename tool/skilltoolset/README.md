@@ -5,7 +5,7 @@
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | `list_skills` | `{}` | Skill names and descriptions |
-| `load_skill` | `{"name":"greeting"}` | Metadata, Markdown instructions, and resource paths |
+| `load_skill` | `{"name":"greeting"}` | Frontmatter, Markdown instructions, and resource paths |
 | `load_skill_resource` | `{"name":"greeting","path":"references/greeting.txt"}` | Resource name, path, and text content |
 
 The filesystem root contains one directory per skill:
@@ -22,6 +22,8 @@ skills/
 single internal hyphens, and must match their directory. Descriptions contain
 1–1024 characters. Optional license, compatibility, metadata, and allowed-tools
 fields are preserved. Both scalar and string-list allowed-tools forms are accepted.
+
+Following the [Agent Skills specification](https://agentskills.io/specification), `skill.Frontmatter` represents the whole YAML header, while its `Metadata` field holds the optional `metadata` key-value map. `skill.Skill.Frontmatter` is returned under the `frontmatter` JSON key by `load_skill`, so custom metadata appears at `frontmatter.metadata`.
 
 ## Register with a model request
 

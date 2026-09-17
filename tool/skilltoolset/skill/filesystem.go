@@ -32,10 +32,10 @@ func NewFileSystem(filesystem fs.FS) (*FileSystem, error) {
 	return &FileSystem{fs: filesystem}, nil
 }
 
-// List returns metadata sorted by skill name. Directories without SKILL.md are
+// List returns frontmatter sorted by skill name. Directories without SKILL.md are
 // skipped; invalid skill documents are reported. Bodies and resources are not
 // loaded. Each directory name must match the skill's frontmatter name.
-func (f *FileSystem) List(ctx context.Context) ([]Metadata, error) {
+func (f *FileSystem) List(ctx context.Context) ([]Frontmatter, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func (f *FileSystem) List(ctx context.Context) ([]Metadata, error) {
 	if err != nil {
 		return nil, fmt.Errorf("skill: list directory: %w", err)
 	}
-	result := []Metadata{}
+	result := []Frontmatter{}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -60,9 +60,9 @@ func (f *FileSystem) List(ctx context.Context) ([]Metadata, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, doc.Metadata)
+		result = append(result, doc.Frontmatter)
 	}
-	slices.SortFunc(result, func(a, b Metadata) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(result, func(a, b Frontmatter) int { return strings.Compare(a.Name, b.Name) })
 	return result, nil
 }
 
@@ -167,17 +167,17 @@ func (f *FileSystem) readSkill(ctx context.Context, name string, withBody bool) 
 	defer file.Close()
 	limited := &io.LimitedReader{R: file, N: maxSkillBytes + 1}
 	reader := bufio.NewReader(limited)
-	metadata, err := parseFrontmatter(reader)
+	frontmatter, err := parseFrontmatter(reader)
 	if limited.N == 0 {
 		return Skill{}, fmt.Errorf("%w: %q exceeds %d bytes", ErrTooLarge, name, maxSkillBytes)
 	}
 	if err != nil {
 		return Skill{}, fmt.Errorf("skill %q: %w", name, err)
 	}
-	if metadata.Name != name {
-		return Skill{}, fmt.Errorf("%w: name %q does not match directory %q", ErrInvalidSkill, metadata.Name, name)
+	if frontmatter.Name != name {
+		return Skill{}, fmt.Errorf("%w: name %q does not match directory %q", ErrInvalidSkill, frontmatter.Name, name)
 	}
-	doc := Skill{Metadata: metadata}
+	doc := Skill{Frontmatter: frontmatter}
 	if withBody {
 		body, err := io.ReadAll(reader)
 		if err != nil {

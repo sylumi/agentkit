@@ -25,7 +25,7 @@ func Parse(data []byte) (Skill, error) {
 		return Skill{}, fmt.Errorf("%w: SKILL.md must be UTF-8 text", ErrInvalidSkill)
 	}
 	r := bufio.NewReader(bytes.NewReader(data))
-	metadata, err := parseFrontmatter(r)
+	frontmatter, err := parseFrontmatter(r)
 	if err != nil {
 		return Skill{}, err
 	}
@@ -33,28 +33,28 @@ func Parse(data []byte) (Skill, error) {
 	if err != nil {
 		return Skill{}, err
 	}
-	return Skill{Metadata: metadata, Instructions: string(body), Resources: []string{}}, nil
+	return Skill{Frontmatter: frontmatter, Instructions: string(body), Resources: []string{}}, nil
 }
 
-func parseFrontmatter(r *bufio.Reader) (Metadata, error) {
+func parseFrontmatter(r *bufio.Reader) (Frontmatter, error) {
 	line, err := r.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return Metadata{}, fmt.Errorf("read frontmatter: %w", err)
+		return Frontmatter{}, fmt.Errorf("read frontmatter: %w", err)
 	}
 	if err != nil || strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r") != "---" {
-		return Metadata{}, fmt.Errorf("%w: expected opening frontmatter delimiter", ErrInvalidSkill)
+		return Frontmatter{}, fmt.Errorf("%w: expected opening frontmatter delimiter", ErrInvalidSkill)
 	}
 	var header strings.Builder
 	for {
 		line, err = r.ReadString('\n')
 		if err != nil && !errors.Is(err, io.EOF) {
-			return Metadata{}, fmt.Errorf("read frontmatter: %w", err)
+			return Frontmatter{}, fmt.Errorf("read frontmatter: %w", err)
 		}
 		if strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r") == "---" {
 			break
 		}
 		if err != nil {
-			return Metadata{}, fmt.Errorf("%w: missing closing frontmatter delimiter", ErrInvalidSkill)
+			return Frontmatter{}, fmt.Errorf("%w: missing closing frontmatter delimiter", ErrInvalidSkill)
 		}
 		header.WriteString(line)
 	}
@@ -65,60 +65,60 @@ func parseFrontmatter(r *bufio.Reader) (Metadata, error) {
 		Description   yamlText            `yaml:"description"`
 		License       yamlText            `yaml:"license"`
 		Compatibility yamlText            `yaml:"compatibility"`
-		Attributes    map[string]yamlText `yaml:"metadata"`
+		Metadata      map[string]yamlText `yaml:"metadata"`
 		AllowedTools  yaml.Node           `yaml:"allowed-tools"`
 	}
 	decoder := yaml.NewDecoder(strings.NewReader(header.String()))
 	if err := decoder.Decode(&wire); err != nil {
-		return Metadata{}, fmt.Errorf("%w: frontmatter: %w", ErrInvalidSkill, err)
+		return Frontmatter{}, fmt.Errorf("%w: frontmatter: %w", ErrInvalidSkill, err)
 	}
 	if err := decoder.Decode(new(yaml.Node)); err != io.EOF {
-		return Metadata{}, fmt.Errorf("%w: expected one frontmatter document", ErrInvalidSkill)
+		return Frontmatter{}, fmt.Errorf("%w: expected one frontmatter document", ErrInvalidSkill)
 	}
-	metadata := Metadata{
+	frontmatter := Frontmatter{
 		Name: string(wire.Name), Description: string(wire.Description),
 		License: string(wire.License), Compatibility: string(wire.Compatibility),
 	}
-	if wire.Attributes != nil {
-		metadata.Attributes = make(map[string]string, len(wire.Attributes))
-		for key, value := range wire.Attributes {
-			metadata.Attributes[key] = string(value)
+	if wire.Metadata != nil {
+		frontmatter.Metadata = make(map[string]string, len(wire.Metadata))
+		for key, value := range wire.Metadata {
+			frontmatter.Metadata[key] = string(value)
 		}
 	}
-	if err := validateName(metadata.Name); err != nil {
-		return Metadata{}, fmt.Errorf("%w: name: %v", ErrInvalidSkill, err)
+	if err := validateName(frontmatter.Name); err != nil {
+		return Frontmatter{}, fmt.Errorf("%w: name: %v", ErrInvalidSkill, err)
 	}
-	if strings.TrimSpace(metadata.Description) == "" || utf8.RuneCountInString(metadata.Description) > 1024 {
-		return Metadata{}, fmt.Errorf("%w: description must contain 1 to 1024 characters", ErrInvalidSkill)
+	if strings.TrimSpace(frontmatter.Description) == "" || utf8.RuneCountInString(frontmatter.Description) > 1024 {
+		return Frontmatter{}, fmt.Errorf("%w: description must contain 1 to 1024 characters", ErrInvalidSkill)
 	}
-	if utf8.RuneCountInString(metadata.Compatibility) > 500 {
-		return Metadata{}, fmt.Errorf("%w: compatibility exceeds 500 characters", ErrInvalidSkill)
+	if utf8.RuneCountInString(frontmatter.Compatibility) > 500 {
+		return Frontmatter{}, fmt.Errorf("%w: compatibility exceeds 500 characters", ErrInvalidSkill)
 	}
 	switch n := &wire.AllowedTools; n.Kind {
 	case 0:
 	case yaml.ScalarNode:
 		if n.Tag != "!!str" {
-			return Metadata{}, fmt.Errorf("%w: allowed-tools must be a string or string list", ErrInvalidSkill)
+			return Frontmatter{}, fmt.Errorf("%w: allowed-tools must be a string or string list", ErrInvalidSkill)
 		}
 		tools, err := splitAllowedTools(n.Value)
 		if err != nil {
-			return Metadata{}, err
+			return Frontmatter{}, err
 		}
-		metadata.AllowedTools = tools
+		frontmatter.AllowedTools = tools
 	case yaml.SequenceNode:
 		for _, item := range n.Content {
 			if item.Kind != yaml.ScalarNode || item.Tag != "!!str" || strings.TrimSpace(item.Value) == "" {
-				return Metadata{}, fmt.Errorf("%w: allowed-tools entries must be non-blank strings", ErrInvalidSkill)
+				return Frontmatter{}, fmt.Errorf("%w: allowed-tools entries must be non-blank strings", ErrInvalidSkill)
 			}
-			metadata.AllowedTools = append(metadata.AllowedTools, item.Value)
+			frontmatter.AllowedTools = append(frontmatter.AllowedTools, item.Value)
 		}
 	default:
-		return Metadata{}, fmt.Errorf("%w: allowed-tools must be a string or string list", ErrInvalidSkill)
+		return Frontmatter{}, fmt.Errorf("%w: allowed-tools must be a string or string list", ErrInvalidSkill)
 	}
-	return metadata, nil
+	return frontmatter, nil
 }
 
-// YAML otherwise coerces numbers and booleans into Go strings. Metadata text
+// YAML otherwise coerces numbers and booleans into Go strings. Frontmatter text
 // should retain the author's declared type, including strings reached by aliases.
 type yamlText string
 

@@ -16,7 +16,7 @@ type LoadArgs struct {
 
 func LoadSkill(filesystem *skill.FileSystem) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
-		Name: LoadName, Description: "Load a skill's instructions, metadata, and resource paths. Resource contents are loaded separately.",
+		Name: LoadName, Description: "Load a skill's instructions, frontmatter, and resource paths. Resource contents are loaded separately.",
 	}, func(ctx context.Context, args LoadArgs) (skill.Skill, error) {
 		return filesystem.Load(ctx, args.Name)
 	})

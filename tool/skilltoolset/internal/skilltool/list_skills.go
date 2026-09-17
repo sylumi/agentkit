@@ -24,12 +24,12 @@ func ListSkills(filesystem *skill.FileSystem) (tool.Tool, error) {
 	return functiontool.New(functiontool.Config{
 		Name: ListName, Description: "List available skills with their names and descriptions.",
 	}, func(ctx context.Context, _ struct{}) (ListResult, error) {
-		metadata, err := filesystem.List(ctx)
+		frontmatters, err := filesystem.List(ctx)
 		if err != nil {
 			return ListResult{}, err
 		}
 		result := ListResult{Skills: []Summary{}}
-		for _, m := range metadata {
+		for _, m := range frontmatters {
 			result.Skills = append(result.Skills, Summary{Name: m.Name, Description: m.Description})
 		}
 		return result, nil

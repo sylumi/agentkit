@@ -39,9 +39,9 @@ func TestFileSystemDiscoveryAndResources(t *testing.T) {
 		"Not-A-Skill/notes.txt":            {Data: []byte("Ignored.")},
 	}
 	f := fixture(t, files)
-	metadata, err := f.List(t.Context())
-	if err != nil || len(metadata) != 2 || metadata[0].Name != "alpha" || metadata[1].Name != "zeta" {
-		t.Fatalf("list = %#v, error = %v", metadata, err)
+	frontmatters, err := f.List(t.Context())
+	if err != nil || len(frontmatters) != 2 || frontmatters[0].Name != "alpha" || frontmatters[1].Name != "zeta" {
+		t.Fatalf("list = %#v, error = %v", frontmatters, err)
 	}
 	doc, err := f.Load(t.Context(), "alpha")
 	if err != nil {
@@ -56,11 +56,11 @@ func TestFileSystemDiscoveryAndResources(t *testing.T) {
 			t.Fatalf("read %s = %q, %v", resource, content, err)
 		}
 	}
-	metadata[0].Attributes["owner"] = "changed"
-	doc.Metadata.Attributes["owner"] = "changed"
+	frontmatters[0].Metadata["owner"] = "changed"
+	doc.Frontmatter.Metadata["owner"] = "changed"
 	doc.Resources[0] = "changed"
 	again, err := f.Load(t.Context(), "alpha")
-	if err != nil || again.Metadata.Attributes["owner"] != "team" || again.Resources[0] != "assets/nested/template.txt" {
+	if err != nil || again.Frontmatter.Metadata["owner"] != "team" || again.Resources[0] != "assets/nested/template.txt" {
 		t.Fatalf("caller edits affected future loads: %+v, %v", again, err)
 	}
 }
@@ -154,7 +154,7 @@ func TestFileSystemCancellationAndConcurrentReads(t *testing.T) {
 				t.Error(err)
 				return
 			}
-			doc.Metadata.Attributes["owner"] = "caller"
+			doc.Frontmatter.Metadata["owner"] = "caller"
 			if _, err := f.ReadResource(t.Context(), "demo", "references/guide.md"); err != nil {
 				t.Error(err)
 			}

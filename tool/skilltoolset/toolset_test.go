@@ -19,7 +19,7 @@ import (
 func newToolset(t *testing.T) *skilltoolset.Toolset {
 	t.Helper()
 	ts, err := skilltoolset.New(skilltoolset.Config{FS: fstest.MapFS{
-		"greeting/SKILL.md":                {Data: []byte("---\nname: greeting\ndescription: Greet someone\n---\nBODY_MARKER: Read references/greeting.txt.\n")},
+		"greeting/SKILL.md":                {Data: []byte("---\nname: greeting\ndescription: Greet someone\nmetadata:\n  owner: team\n---\nBODY_MARKER: Read references/greeting.txt.\n")},
 		"greeting/references/greeting.txt": {Data: []byte("RESOURCE_MARKER: Hello!")},
 	}})
 	if err != nil {
@@ -67,9 +67,22 @@ func TestProgressiveSkillWorkflow(t *testing.T) {
 				t.Fatal("list leaked content")
 			}
 		case 1:
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(content), &fields); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := fields["frontmatter"]; !ok {
+				t.Fatalf("load result is missing frontmatter: %s", content)
+			}
+			if _, ok := fields["metadata"]; ok {
+				t.Fatalf("load result uses the old metadata wrapper: %s", content)
+			}
 			var loaded skill.Skill
 			if err := json.Unmarshal([]byte(content), &loaded); err != nil {
 				t.Fatal(err)
+			}
+			if loaded.Frontmatter.Name != "greeting" || loaded.Frontmatter.Metadata["owner"] != "team" {
+				t.Fatalf("wrong frontmatter load: %s", content)
 			}
 			if !strings.Contains(loaded.Instructions, "BODY_MARKER") || len(loaded.Resources) != 1 || loaded.Resources[0] != "references/greeting.txt" || strings.Contains(content, "RESOURCE_MARKER") {
 				t.Fatalf("wrong instruction load: %s", content)

@@ -17,13 +17,13 @@ func TestParseFrontmatter(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := skill.Metadata{
+			want := skill.Frontmatter{
 				Name: "report", Description: "Prepare a report.\nInclude references.\n",
-				License: "MIT", Compatibility: "Requires Go", Attributes: map[string]string{"owner": "team"},
+				License: "MIT", Compatibility: "Requires Go", Metadata: map[string]string{"owner": "team"},
 				AllowedTools: []string{"Read", "Bash(git status)"},
 			}
-			if !reflect.DeepEqual(got.Metadata, want) {
-				t.Fatalf("metadata = %#v, want %#v", got.Metadata, want)
+			if !reflect.DeepEqual(got.Frontmatter, want) {
+				t.Fatalf("frontmatter = %#v, want %#v", got.Frontmatter, want)
 			}
 			body := strings.ReplaceAll("\n# Report\n\nPreserve this body.\n---\n", "\n", newline)
 			if got.Instructions != body || len(got.Resources) != 0 {
@@ -42,8 +42,8 @@ func TestAllowedToolsFormats(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(doc.Metadata.AllowedTools, []string{"Read", "Bash(git status)", "Bash(jq:*)"}) {
-			t.Fatalf("allowed tools = %v", doc.Metadata.AllowedTools)
+		if !reflect.DeepEqual(doc.Frontmatter.AllowedTools, []string{"Read", "Bash(git status)", "Bash(jq:*)"}) {
+			t.Fatalf("allowed tools = %v", doc.Frontmatter.AllowedTools)
 		}
 	}
 }
