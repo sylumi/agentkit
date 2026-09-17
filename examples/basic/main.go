@@ -25,22 +25,11 @@ func main() {
 }
 
 func run() error {
-	apiKey := os.Getenv("DEEPSEEK_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("set DEEPSEEK_API_KEY before running this example")
-	}
-
-	// Look up model metadata in the built-in catalog without a network request.
-	info, err := modelcatalog.Lookup("deepseek", "deepseek-v4-flash")
-	if err != nil {
-		return err
-	}
-
 	// DeepSeek uses the Responses API adapter with its own address and key.
 	llm, err := openaimodel.NewModel(openaimodel.Config{
-		Model:   info,
+		Model:   modelcatalog.MustLookup("deepseek", "deepseek-v4-flash"),
 		BaseURL: "https://api.deepseek.com/",
-		APIKey:  apiKey,
+		APIKey:  os.Getenv("DEEPSEEK_API_KEY"),
 	})
 	if err != nil {
 		return err

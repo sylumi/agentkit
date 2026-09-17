@@ -88,3 +88,22 @@ func TestDefaultQueries(t *testing.T) {
 		t.Fatalf("empty provider ID did not list all providers, got error %v", err)
 	}
 }
+
+func TestMustLookup(t *testing.T) {
+	info := modelcatalog.MustLookup("deepseek", "deepseek-v4-flash")
+	if info.Provider.ID != "deepseek" || info.ID != "deepseek-v4-flash" {
+		t.Fatalf("unexpected model: %q/%q", info.Provider.ID, info.ID)
+	}
+	for _, key := range [][2]string{{"absent", "deepseek-v4-flash"}, {"deepseek", "absent"}} {
+		t.Run(key[0]+"/"+key[1], func(t *testing.T) {
+			_, want := modelcatalog.Lookup(key[0], key[1])
+			defer func() {
+				got, ok := recover().(error)
+				if !ok || want == nil || got.Error() != want.Error() {
+					t.Fatalf("panic = %v, want lookup error %v", got, want)
+				}
+			}()
+			modelcatalog.MustLookup(key[0], key[1])
+		})
+	}
+}
