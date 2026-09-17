@@ -1,4 +1,4 @@
-// Package tool defines executable tools available to an agent.
+// Package tool defines executable tools and tool collections.
 package tool
 
 import (
@@ -18,4 +18,14 @@ type Tool interface {
 	// Implementations must honor ctx cancellation and leave arguments unchanged.
 	// The caller associates the result with a call ID and handles errors.
 	Execute(ctx context.Context, arguments json.RawMessage) (string, error)
+}
+
+// Toolset provides a named collection of tools.
+type Toolset interface {
+	// Name identifies the collection without renaming its tools.
+	Name() string
+
+	// Tools discovers tools for the current call, honoring ctx cancellation.
+	// The caller owns the returned slice; tool instances may be shared.
+	Tools(ctx context.Context) ([]Tool, error)
 }

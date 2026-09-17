@@ -14,6 +14,14 @@ import (
 
 const defaultName = "SkillToolset"
 
+const defaultSystemInstruction = "Skills provide instructions and reference material for specialized tasks.\n" +
+	"The available_skills catalog below contains skill names and descriptions.\n" +
+	"Use `" + skilltool.ListName + "` to list the available skills.\n" +
+	"When a skill is relevant, call `" + skilltool.LoadName + "` with name=\"<skill name>\" to read its instructions before using it.\n" +
+	"Follow the loaded instructions within the task and the tools provided by the application.\n" +
+	"The load result includes resource paths. Read a needed resource using `" + skilltool.ResourceName + "` with name=\"<skill name>\" and path=\"<resource path>\".\n" +
+	"Resources are returned as text. Reading a script does not run it, and skill metadata does not grant tools or permissions.\n"
+
 // Config selects the skill source and toolset options.
 type Config struct {
 	Source skill.Source
@@ -29,6 +37,15 @@ type Toolset struct {
 	source            skill.Source
 	tools             []tool.Tool
 	systemInstruction string
+}
+
+func (ts *Toolset) Name() string { return ts.name }
+
+func (ts *Toolset) Tools(ctx context.Context) ([]tool.Tool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return slices.Clone(ts.tools), nil
 }
 
 // New constructs the tools without reading skill content.
@@ -60,14 +77,6 @@ func New(cfg Config) (*Toolset, error) {
 	return ts, nil
 }
 
-const defaultSystemInstruction = "Skills provide instructions and reference material for specialized tasks.\n" +
-	"The available_skills catalog below contains skill names and descriptions.\n" +
-	"Use `" + skilltool.ListName + "` to list the available skills.\n" +
-	"When a skill is relevant, call `" + skilltool.LoadName + "` with name=\"<skill name>\" to read its instructions before using it.\n" +
-	"Follow the loaded instructions within the task and the tools provided by the application.\n" +
-	"The load result includes resource paths. Read a needed resource using `" + skilltool.ResourceName + "` with name=\"<skill name>\" and path=\"<resource path>\".\n" +
-	"Resources are returned as text. Reading a script does not run it, and skill metadata does not grant tools or permissions.\n"
-
 // Instructions returns usage guidance and an escaped catalog of names and descriptions.
 // Add it to each model request. An empty catalog returns an empty string.
 func (ts *Toolset) Instructions(ctx context.Context) (string, error) {
@@ -95,10 +104,3 @@ func (ts *Toolset) Instructions(ctx context.Context) (string, error) {
 	}
 	return ts.systemInstruction + "\n" + string(data), nil
 }
-
-// Name returns the toolset name.
-func (ts *Toolset) Name() string { return ts.name }
-
-// Tools returns list_skills, load_skill, and load_skill_resource, in that order.
-// The returned slice is a copy.
-func (ts *Toolset) Tools() []tool.Tool { return slices.Clone(ts.tools) }

@@ -56,7 +56,11 @@ func TestInstructionsMatchToolParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, implementation := range ts.Tools() {
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, implementation := range tools {
 		definition := implementation.Definition()
 		if !strings.Contains(text, "`"+definition.Name+"`") {
 			t.Errorf("instructions omit %s", definition.Name)
@@ -90,7 +94,11 @@ func TestEmptyCatalog(t *testing.T) {
 	if text, err := ts.Instructions(t.Context()); err != nil || text != "" {
 		t.Fatalf("empty instructions = %q, %v", text, err)
 	}
-	content, err := ts.Tools()[0].Execute(t.Context(), json.RawMessage(`{}`))
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := tools[0].Execute(t.Context(), json.RawMessage(`{}`))
 	if err != nil || content != `{"skills":[]}` {
 		t.Fatalf("empty list = %q, %v", content, err)
 	}
@@ -109,8 +117,12 @@ func TestCustomConfiguration(t *testing.T) {
 	if ts.Name() != "ProjectSkills" {
 		t.Fatalf("custom name = %q", ts.Name())
 	}
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, want := range []string{"list_skills", "load_skill", "load_skill_resource"} {
-		if got := ts.Tools()[i].Definition().Name; got != want {
+		if got := tools[i].Definition().Name; got != want {
 			t.Fatalf("tool name = %q, want %q", got, want)
 		}
 	}

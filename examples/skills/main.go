@@ -60,8 +60,12 @@ func run() error {
 			Reasoning:       &model.ReasoningConfig{Enabled: &thinking},
 		},
 	}
+	tools, err := skills.Tools(ctx)
+	if err != nil {
+		return err
+	}
 	registered := make(map[string]tool.Tool)
-	for _, t := range skills.Tools() {
+	for _, t := range tools {
 		definition := t.Definition()
 		req.Tools = append(req.Tools, definition)
 		registered[definition.Name] = t

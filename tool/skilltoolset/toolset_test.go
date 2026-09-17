@@ -30,8 +30,9 @@ func newToolset(t *testing.T) *skilltoolset.Toolset {
 }
 
 func TestProgressiveSkillWorkflow(t *testing.T) {
-	ts := newToolset(t)
-	instructions, err := ts.Instructions(t.Context())
+	skills := newToolset(t)
+	var ts tool.Toolset = skills
+	instructions, err := skills.Instructions(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +40,12 @@ func TestProgressiveSkillWorkflow(t *testing.T) {
 		Instructions: "You are a helpful assistant.\n" + instructions,
 		Messages:     []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("Please greet me.")}}},
 	}
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	registered := map[string]tool.Tool{}
-	for _, implementation := range ts.Tools() {
+	for _, implementation := range tools {
 		definition := implementation.Definition()
 		req.Tools = append(req.Tools, definition)
 		registered[definition.Name] = implementation
@@ -129,13 +134,23 @@ func TestConstructionAndOwnership(t *testing.T) {
 	if ts.Name() != "SkillToolset" {
 		t.Fatalf("default name = %q", ts.Name())
 	}
-	returned := ts.Tools()
+	returned, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(returned) != 3 {
 		t.Fatalf("tool count = %d", len(returned))
 	}
 	returned[0] = nil
-	if ts.Tools()[0] == nil {
+	again, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 3 || again[0] == nil {
 		t.Fatal("tool slice aliases internal storage")
+	}
+	if files.reads != 0 {
+		t.Fatal("tool discovery read skill files")
 	}
 	if _, err := ts.Instructions(t.Context()); !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("filesystem error lost: %v", err)
@@ -150,8 +165,13 @@ func TestConcurrentToolCalls(t *testing.T) {
 			if _, err := ts.Instructions(t.Context()); err != nil {
 				t.Error(err)
 			}
+			tools, err := ts.Tools(t.Context())
+			if err != nil {
+				t.Error(err)
+				return
+			}
 			for i, args := range []string{`{}`, `{"name":"greeting"}`, `{"name":"greeting","path":"references/greeting.txt"}`} {
-				if _, err := ts.Tools()[i].Execute(t.Context(), json.RawMessage(args)); err != nil {
+				if _, err := tools[i].Execute(t.Context(), json.RawMessage(args)); err != nil {
 					t.Error(err)
 				}
 			}
@@ -162,5 +182,19 @@ func TestConcurrentToolCalls(t *testing.T) {
 	cancel()
 	if _, err := ts.Instructions(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
+	}
+}
+
+func TestToolsCancellation(t *testing.T) {
+	var ts tool.Toolset = newToolset(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	tools, err := ts.Tools(ctx)
+	if !errors.Is(err, context.Canceled) || len(tools) != 0 {
+		t.Fatalf("canceled discovery returned %d tools, error = %v", len(tools), err)
+	}
+	tools, err = ts.Tools(t.Context())
+	if err != nil || len(tools) != 3 {
+		t.Fatalf("fresh discovery returned %d tools, error = %v", len(tools), err)
 	}
 }

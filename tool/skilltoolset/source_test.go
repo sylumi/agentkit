@@ -66,6 +66,10 @@ func TestToolsetCustomSource(t *testing.T) {
 	if err != nil || !strings.Contains(instructions, "A &lt;custom&gt; skill") || strings.Contains(instructions, "BODY_MARKER") || strings.Contains(instructions, "RESOURCE_MARKER") {
 		t.Fatalf("catalog = %q, %v", instructions, err)
 	}
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, tc := range []struct {
 		args string
 		want string
@@ -74,7 +78,7 @@ func TestToolsetCustomSource(t *testing.T) {
 		{`{"name":"demo"}`, `{"frontmatter":{"name":"demo","description":"A <custom> skill"},"instructions":"BODY_MARKER: Read references/guide.md.","resources":["references/guide.md"]}`},
 		{`{"name":"demo","path":"references/guide.md"}`, `{"name":"demo","path":"references/guide.md","content":"RESOURCE_MARKER: Guide"}`},
 	} {
-		got, err := ts.Tools()[i].Execute(t.Context(), json.RawMessage(tc.args))
+		got, err := tools[i].Execute(t.Context(), json.RawMessage(tc.args))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +96,7 @@ func TestToolsetCustomSource(t *testing.T) {
 }
 
 func TestToolsetSourceConfiguration(t *testing.T) {
-	// A source is not consulted until instructions or tools are requested.
+	// Constructing tools does not access the source.
 	if _, err := skilltoolset.New(skilltoolset.Config{Source: &unusedSource{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +107,11 @@ func TestToolsetSourceConfiguration(t *testing.T) {
 	if _, err := ts.Instructions(t.Context()); !errors.Is(err, skill.ErrDuplicateSkill) {
 		t.Fatalf("instructions did not detect duplicates: %v", err)
 	}
-	if _, err := ts.Tools()[0].Execute(t.Context(), json.RawMessage(`{}`)); !errors.Is(err, skill.ErrDuplicateSkill) {
+	tools, err := ts.Tools(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tools[0].Execute(t.Context(), json.RawMessage(`{}`)); !errors.Is(err, skill.ErrDuplicateSkill) {
 		t.Fatalf("list tool did not detect duplicates: %v", err)
 	}
 }
