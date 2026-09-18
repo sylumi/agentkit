@@ -2,13 +2,14 @@ package session
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"iter"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type inMemoryService struct {
@@ -28,7 +29,7 @@ func (s *inMemoryService) Create(ctx context.Context, req *CreateRequest) (*Crea
 
 	sessionID := req.SessionID
 	if sessionID == "" {
-		sessionID = rand.Text()
+		sessionID = uuid.NewString()
 	}
 	key := sessionKey{
 		appName:   req.AppName,

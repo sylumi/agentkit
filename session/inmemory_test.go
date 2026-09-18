@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/session"
 )
@@ -40,6 +42,10 @@ func TestServiceLifecycleAndIdentityIsolation(t *testing.T) {
 	generated, err := service.Create(ctx, request)
 	if err != nil || generated.Session.ID() == "" || request.SessionID != "" {
 		t.Fatalf("generated session: %+v, %v", generated, err)
+	}
+	generatedID, err := uuid.Parse(generated.Session.ID())
+	if err != nil || generatedID.Version() != 4 {
+		t.Fatalf("expected a UUID v4 session ID, got %q: %v", generated.Session.ID(), err)
 	}
 	for _, key := range []struct{ app, user, id string }{
 		{"scope", "one", "z"}, {"scope", "one", "a"}, {"scope", "two", "a"}, {"other", "one", "a"},

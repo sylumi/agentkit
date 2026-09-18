@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/google/jsonschema-go v0.4.3
+	github.com/google/uuid v1.6.0
 	github.com/openai/openai-go/v3 v3.54.0
 	go.yaml.in/yaml/v3 v3.0.5
 )
