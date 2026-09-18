@@ -5,12 +5,16 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 
 	"github.com/sylumi/agentkit/agent"
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/tool"
 )
+
+const defaultMaxModelCalls = 10
 
 // Config describes an LLM agent.
 type Config struct {
@@ -18,13 +22,22 @@ type Config struct {
 	Description string
 	Model       model.LLM
 	Instruction string
+
+	Tools []tool.Tool
+	// GenerateConfig and its nested data must remain unchanged during Run.
+	GenerateConfig *model.GenerateConfig
+	// MaxModelCalls limits model calls per Run; zero defaults to 10.
+	MaxModelCalls int
 }
 
 type llmAgent struct {
-	name        string
-	description string
-	model       model.LLM
-	instruction string
+	name           string
+	description    string
+	model          model.LLM
+	instruction    string
+	tools          []tool.Tool
+	generateConfig *model.GenerateConfig
+	maxModelCalls  int
 }
 
 // New creates an agent without calling the model.
@@ -35,11 +48,20 @@ func New(cfg Config) (agent.Agent, error) {
 	if cfg.Model == nil {
 		return nil, fmt.Errorf("llmagent: model is required")
 	}
+	if cfg.MaxModelCalls < 0 {
+		return nil, fmt.Errorf("llmagent: max model calls must not be negative")
+	}
+	if cfg.MaxModelCalls == 0 {
+		cfg.MaxModelCalls = defaultMaxModelCalls
+	}
 	return &llmAgent{
-		name:        cfg.Name,
-		description: cfg.Description,
-		model:       cfg.Model,
-		instruction: cfg.Instruction,
+		name:           cfg.Name,
+		description:    cfg.Description,
+		model:          cfg.Model,
+		instruction:    cfg.Instruction,
+		tools:          slices.Clone(cfg.Tools),
+		generateConfig: cfg.GenerateConfig,
+		maxModelCalls:  cfg.MaxModelCalls,
 	}, nil
 }
 
@@ -53,7 +75,16 @@ func (a *llmAgent) Run(ctx context.Context, invocation *agent.InvocationContext)
 			yield(nil, err)
 			return
 		}
-		req := model.Request{Instructions: a.instruction}
+		definitions, _, err := registerTools(a.tools)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
+		req := model.Request{
+			Instructions: a.instruction,
+			Tools:        definitions,
+			Config:       a.generateConfig,
+		}
 		for event := range invocation.Session.Events().All() {
 			if event.Message != nil {
 				req.Messages = append(req.Messages, *event.Message)

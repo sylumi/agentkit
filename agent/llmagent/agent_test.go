@@ -8,18 +8,36 @@ import (
 	"iter"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/sylumi/agentkit/agent"
 	"github.com/sylumi/agentkit/agent/llmagent"
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/tool"
 )
 
 type modelFunc func(context.Context, model.Request, bool) iter.Seq2[model.Event, error]
 
 func (f modelFunc) Generate(ctx context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
 	return f(ctx, req, stream)
+}
+
+type stubTool struct {
+	t               *testing.T
+	definition      model.ToolDefinition
+	definitionCalls int
+}
+
+func (s *stubTool) Definition() model.ToolDefinition {
+	s.definitionCalls++
+	return s.definition
+}
+
+func (s *stubTool) Execute(context.Context, json.RawMessage) (string, error) {
+	s.t.Fatal("unexpected tool execution")
+	return "", nil
 }
 
 func newInvocation(t *testing.T) (session.Service, *agent.InvocationContext) {
@@ -39,6 +57,7 @@ func TestNew(t *testing.T) {
 	})
 	for _, cfg := range []llmagent.Config{
 		{Model: llm}, {Name: " \t", Model: llm}, {Name: "chat"},
+		{Name: "chat", Model: llm, MaxModelCalls: -1},
 	} {
 		if _, err := llmagent.New(cfg); err == nil {
 			t.Fatalf("accepted invalid config: %+v", cfg)
@@ -52,6 +71,134 @@ func TestNew(t *testing.T) {
 		if a.Name() != "chat" || a.Description() != description {
 			t.Fatalf("agent identity: %q, %q", a.Name(), a.Description())
 		}
+	}
+	for _, limit := range []int{0, 1, 20} {
+		if _, err := llmagent.New(llmagent.Config{Name: "chat", Model: llm, MaxModelCalls: limit}); err != nil {
+			t.Fatalf("rejected model call limit %d: %v", limit, err)
+		}
+	}
+}
+
+func TestRunToolsAndGenerateConfig(t *testing.T) {
+	maxTokens, reasoning := int64(256), false
+	for _, tc := range []struct {
+		name   string
+		config *model.GenerateConfig
+	}{
+		{name: "defaults"},
+		{name: "named tool", config: &model.GenerateConfig{
+			MaxOutputTokens: &maxTokens,
+			ToolChoice:      &model.ToolChoice{Mode: model.ToolChoiceNamed, Name: "weather"},
+			Reasoning:       &model.ReasoningConfig{Enabled: &reasoning},
+		}},
+		{name: "required tool", config: &model.GenerateConfig{
+			ToolChoice: &model.ToolChoice{Mode: model.ToolChoiceRequired},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, invocation := newInvocation(t)
+			weather := &stubTool{t: t, definition: model.ToolDefinition{
+				Name: "weather", Description: "Get the weather for a city.",
+				InputSchema: json.RawMessage(`{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}`),
+			}}
+			clock := &stubTool{t: t, definition: model.ToolDefinition{
+				Name: "clock", Description: "Get the current time.", InputSchema: json.RawMessage(`{"type":"object"}`),
+			}}
+			configuredTools := []tool.Tool{weather, clock}
+			wantRequest := model.Request{
+				Instructions: "Use the available tools.",
+				Tools:        []model.ToolDefinition{weather.definition, clock.definition},
+				Config:       tc.config,
+			}
+			before, err := json.Marshal(wantRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			modelCalls := 0
+			a, err := llmagent.New(llmagent.Config{
+				Name: "chat", Instruction: wantRequest.Instructions,
+				Tools: configuredTools, GenerateConfig: tc.config,
+				Model: modelFunc(func(_ context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
+					modelCalls++
+					if stream || !reflect.DeepEqual(req, wantRequest) {
+						t.Fatalf("model request: %+v, stream=%t", req, stream)
+					}
+					if weather.definitionCalls != modelCalls || clock.definitionCalls != modelCalls {
+						t.Fatalf("definitions were not read once per Run: weather=%d, clock=%d, calls=%d",
+							weather.definitionCalls, clock.definitionCalls, modelCalls)
+					}
+					return func(yield func(model.Event, error) bool) {
+						yield(model.ResultEvent{Result: model.Result{StopReason: model.StopReasonStop}}, nil)
+					}
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			configuredTools[0] = clock
+			for run := range 2 {
+				outputs := a.Run(t.Context(), invocation)
+				if weather.definitionCalls != run || clock.definitionCalls != run || modelCalls != run {
+					t.Fatal("tools or model accessed before consumption")
+				}
+				count := 0
+				for _, err := range outputs {
+					if err != nil {
+						t.Fatal(err)
+					}
+					count++
+				}
+				if count != 1 || modelCalls != run+1 {
+					t.Fatalf("got %d events and %d total model calls", count, modelCalls)
+				}
+			}
+			after, err := json.Marshal(wantRequest)
+			if err != nil || !bytes.Equal(before, after) {
+				t.Fatalf("Run changed caller data: %s, %v", after, err)
+			}
+			if configuredTools[0] != clock || configuredTools[1] != clock {
+				t.Fatal("Run changed the caller's tool slice")
+			}
+		})
+	}
+}
+
+func TestRunRejectsInvalidTools(t *testing.T) {
+	for _, name := range []string{"nil tool", "duplicate name"} {
+		t.Run(name, func(t *testing.T) {
+			_, invocation := newInvocation(t)
+			first := &stubTool{t: t, definition: model.ToolDefinition{
+				Name: "weather", InputSchema: json.RawMessage(`{"type":"object"}`),
+			}}
+			configuredTools := []tool.Tool{first, nil}
+			wantError := "tools[1] must not be nil"
+			if name == "duplicate name" {
+				configuredTools[1] = &stubTool{t: t, definition: model.ToolDefinition{
+					Name: "weather", Description: "A different weather tool.", InputSchema: json.RawMessage(`{"type":"object"}`),
+				}}
+				wantError = `duplicate tool name "weather"`
+			}
+			a, err := llmagent.New(llmagent.Config{
+				Name: "chat", Tools: configuredTools,
+				Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
+					t.Fatal("invalid tools reached the model")
+					return nil
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for event, err := range a.Run(t.Context(), invocation) {
+				count++
+				if event != nil || err == nil || !strings.Contains(err.Error(), wantError) {
+					t.Fatalf("registration failure: event=%+v, error=%v", event, err)
+				}
+			}
+			if count != 1 || invocation.Session.Events().Len() != 0 {
+				t.Fatalf("registration failure yielded %d events and saved %d", count, invocation.Session.Events().Len())
+			}
+		})
 	}
 }
 
@@ -256,7 +403,8 @@ func TestRunModelErrors(t *testing.T) {
 
 func TestRunCanceledBeforeConsumption(t *testing.T) {
 	_, invocation := newInvocation(t)
-	a, err := llmagent.New(llmagent.Config{Name: "chat", Model: modelFunc(
+	configuredTool := &stubTool{t: t, definition: model.ToolDefinition{Name: "weather"}}
+	a, err := llmagent.New(llmagent.Config{Name: "chat", Tools: []tool.Tool{configuredTool}, Model: modelFunc(
 		func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 			t.Fatal("canceled invocation called the model")
 			return nil
@@ -277,6 +425,9 @@ func TestRunCanceledBeforeConsumption(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("got %d cancellation errors", count)
+	}
+	if configuredTool.definitionCalls != 0 {
+		t.Fatal("canceled invocation registered tools")
 	}
 }
 
