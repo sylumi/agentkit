@@ -99,37 +99,55 @@ func TestDecodedInvalidMessagesFailBeforeIO(t *testing.T) {
 	}
 }
 
-func TestThinkingHistoryFailsBeforeIO(t *testing.T) {
+func TestThinkingHistorySentAsAssistantText(t *testing.T) {
 	for _, kind := range []model.ThinkingKind{model.ThinkingUnknown, model.ThinkingText, model.ThinkingSummary} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%t", kind, stream), func(t *testing.T) {
 				calls := 0
-				m := protocolModel(t, &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+				m := protocolModel(t, &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
 					calls++
-					return nil, errors.New("unexpected HTTP request")
+					var body struct {
+						Input json.RawMessage `json:"input"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+					var got, want any
+					if err := json.Unmarshal(body.Input, &got); err != nil {
+						t.Fatal(err)
+					}
+					if err := json.Unmarshal([]byte(`[{"role":"assistant","content":[{"type":"input_text","text":"thinking"},{"type":"input_text","text":"answer"}]}]`), &want); err != nil {
+						t.Fatal(err)
+					}
+					if !reflect.DeepEqual(got, want) {
+						t.Fatalf("thinking history was not sent as ordinary text: %s", body.Input)
+					}
+					response := responseBody(t, fullResponse("completed", textItem("next answer")))
+					contentType := "application/json"
+					if stream {
+						contentType = "text/event-stream"
+						response = "data: {\"type\":\"response.completed\",\"response\":" + response + "}\n\n"
+					}
+					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(response))}, nil
 				})})
 				req := model.Request{Messages: []model.Message{{Role: model.RoleAssistant, Parts: []model.Part{
-					model.NewTextPart("answer"),
 					{Kind: model.PartThinking, Thinking: &model.ThinkingPart{Kind: kind, Text: "thinking"}},
+					model.NewTextPart("answer"),
 				}}}}
-				if err := req.Validate(); err != nil {
-					t.Fatal(err)
-				}
-				var failure error
-				yields := 0
-				for event, err := range m.Generate(context.Background(), req, stream) {
-					yields++
-					if event != nil {
-						t.Fatal("thinking history produced an event")
+				finals := 0
+				for event, err := range m.Generate(t.Context(), req, stream) {
+					if err != nil {
+						t.Fatal(err)
 					}
-					failure = err
+					if result, ok := event.(model.ResultEvent); ok {
+						finals++
+						if result.Result.Message == nil || *result.Result.Message.Parts[0].Text != "next answer" {
+							t.Fatalf("unexpected result: %+v", result)
+						}
+					}
 				}
-				if yields != 1 {
-					t.Fatalf("yields=%d, want one error", yields)
-				}
-				var callErr *model.CallError
-				if !errors.As(failure, &callErr) || !strings.Contains(failure.Error(), "messages[0].parts[1]: thinking history is not supported") || calls != 0 {
-					t.Fatalf("error=%v HTTP calls=%d; expected history rejection before I/O", failure, calls)
+				if calls != 1 || finals != 1 {
+					t.Fatalf("HTTP calls=%d final results=%d", calls, finals)
 				}
 			})
 		}

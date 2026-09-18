@@ -48,7 +48,8 @@ func NewModel(cfg Config) (model.LLM, error) {
 // context, HTTP request, and output buffers. stream selects SSE or ordinary JSON
 // responses; ordinary responses emit only a ResultEvent. Thinking output contains
 // visible reasoning text and summaries. Encrypted reasoning data is discarded;
-// it is not emitted or retained for replay. Thinking history is unsupported.
+// it is not emitted or retained for replay. Historical thinking text and summaries
+// are sent as ordinary assistant text, not as native reasoning items.
 // Tool results with IsError are encoded as JSON text containing is_error and
 // content, since Responses has no error flag.
 func (m *openAIModel) Generate(ctx context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {

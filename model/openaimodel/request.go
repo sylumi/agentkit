@@ -70,23 +70,25 @@ func mapMessageParts(role model.Role, parts []model.Part) (responses.ResponseInp
 	var input responses.ResponseInputParam
 	for j := 0; j < len(parts); j++ {
 		switch part := parts[j]; part.Kind {
-		case model.PartText:
-			content := responses.ResponseInputMessageContentListParam{
-				responses.ResponseInputContentParamOfInputText(*part.Text),
-			}
-			// Keep consecutive text parts in one message without crossing tool items
-			// or the original message boundary.
-			for j+1 < len(parts) {
-				next := parts[j+1]
-				if next.Kind != model.PartText {
+		case model.PartText, model.PartThinking:
+			// Visible thinking is ordinary history text. Keep consecutive text and
+			// thinking parts together without crossing tool or message boundaries.
+			var content responses.ResponseInputMessageContentListParam
+			for {
+				text := ""
+				if part.Kind == model.PartThinking {
+					text = part.Thinking.Text
+				} else {
+					text = *part.Text
+				}
+				content = append(content, responses.ResponseInputContentParamOfInputText(text))
+				if j+1 == len(parts) || (parts[j+1].Kind != model.PartText && parts[j+1].Kind != model.PartThinking) {
 					break
 				}
 				j++
-				content = append(content, responses.ResponseInputContentParamOfInputText(*next.Text))
+				part = parts[j]
 			}
 			input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRole(role)))
-		case model.PartThinking:
-			return nil, fmt.Errorf("parts[%d]: thinking history is not supported", j)
 		case model.PartToolCall:
 			call := part.ToolCall
 			input = append(input, responses.ResponseInputItemParamOfFunctionCall(string(call.Arguments), call.ID, call.Name))
