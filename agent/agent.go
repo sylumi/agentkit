@@ -1,0 +1,20 @@
+// Package agent defines agents and invocation data.
+package agent
+
+import (
+	"context"
+	"iter"
+
+	"github.com/sylumi/agentkit/session"
+)
+
+// Agent produces events for one invocation.
+type Agent interface {
+	Name() string
+	Description() string
+
+	// Run lazily yields complete events; the caller persists them.
+	// Implementations honor ctx cancellation and stop when yield returns false.
+	// An execution error is yielded once with a nil event, then Run ends.
+	Run(ctx context.Context, invocation *InvocationContext) iter.Seq2[*session.Event, error]
+}
