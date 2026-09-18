@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/sylumi/agentkit/model"
@@ -97,6 +96,9 @@ func TestRequestTextMessageBoundaries(t *testing.T) {
 	text := func(value string) model.Part {
 		return model.NewTextPart(value)
 	}
+	thinking := func(value string) model.Part {
+		return model.Part{Kind: model.PartThinking, Thinking: &model.ThinkingPart{Kind: model.ThinkingText, Text: value}}
+	}
 	call := model.Part{Kind: model.PartToolCall, ToolCall: &model.ToolCallPart{
 		ID: "call_1", Name: "lookup", Arguments: json.RawMessage(`{"id":1}`),
 	}}
@@ -105,6 +107,19 @@ func TestRequestTextMessageBoundaries(t *testing.T) {
 		messages []model.Message
 		want     string
 	}{
+		{
+			name: "thinking and text preserve tool and message boundaries",
+			messages: []model.Message{
+				{Role: model.RoleAssistant, Parts: []model.Part{thinking("checking"), text("before"), call, thinking("after"), text("answer")}},
+				{Role: model.RoleAssistant, Parts: []model.Part{thinking("")}},
+			},
+			want: `[
+				{"role":"assistant","content":[{"type":"input_text","text":"checking"},{"type":"input_text","text":"before"}]},
+				{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"id\":1}"},
+				{"role":"assistant","content":[{"type":"input_text","text":"after"},{"type":"input_text","text":"answer"}]},
+				{"role":"assistant","content":[{"type":"input_text","text":""}]}
+			]`,
+		},
 		{
 			name: "user text blocks",
 			messages: []model.Message{
@@ -244,16 +259,5 @@ func TestRequestGenerateConfigMapping(t *testing.T) {
 				t.Fatalf("max_output_tokens = %s, want %s", wire["max_output_tokens"], wantLimit)
 			}
 		})
-	}
-}
-
-func TestRequestRejectsThinkingHistory(t *testing.T) {
-	for _, kind := range []model.ThinkingKind{model.ThinkingUnknown, model.ThinkingText, model.ThinkingSummary} {
-		part := model.ThinkingPart{Kind: kind, Text: "thinking"}
-		req := model.Request{Messages: []model.Message{{Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartThinking, Thinking: &part}}}}}
-		_, err := buildOpenAIParams(model.ModelInfo{ID: "test-model"}, req)
-		if err == nil || !strings.Contains(err.Error(), "thinking history is not supported") {
-			t.Fatalf("accepted thinking history kind %q: %v", kind, err)
-		}
 	}
 }
