@@ -13,7 +13,8 @@ type Agent interface {
 	Name() string
 	Description() string
 
-	// Run lazily yields complete events; the caller persists them.
+	// Run lazily yields complete events. Persist each event to invocation.Session
+	// before advancing the iterator.
 	// Implementations honor ctx cancellation and stop when yield returns false.
 	// An execution error is yielded once with a nil event, then Run ends.
 	Run(ctx context.Context, invocation *InvocationContext) iter.Seq2[*session.Event, error]
