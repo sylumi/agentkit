@@ -33,3 +33,4 @@ go.work.sum
 
 # Local skill toolset planning documents
 .local-plans/
+.agents/
