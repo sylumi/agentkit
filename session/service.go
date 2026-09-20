@@ -17,7 +17,8 @@ type Service interface {
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	List(context.Context, *ListRequest) (*ListResponse, error)
 	Delete(context.Context, *DeleteRequest) error
-	// AppendEvent commits an event, then updates the supplied view.
+	// AppendEvent commits a complete event, then updates the supplied view.
+	// Partial events are ignored without changing history or update times.
 	// Treat submitted events and their nested data as read-only.
 	AppendEvent(context.Context, Session, *Event) error
 }

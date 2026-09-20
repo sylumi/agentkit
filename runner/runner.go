@@ -27,6 +27,19 @@ type Runner struct {
 	sessionService session.Service
 }
 
+type runOptions struct {
+	streaming bool
+}
+
+// RunOption configures one invocation without changing the shared Runner.
+type RunOption func(*runOptions)
+
+// WithStreaming requests partial events alongside complete events.
+// Only complete events are saved. Streaming is disabled by default.
+func WithStreaming(enabled bool) RunOption {
+	return func(options *runOptions) { options.streaming = enabled }
+}
+
 func New(cfg Config) (*Runner, error) {
 	if strings.TrimSpace(cfg.AppName) == "" {
 		return nil, fmt.Errorf("runner: app name is required")
@@ -40,9 +53,14 @@ func New(cfg Config) (*Runner, error) {
 	return &Runner{appName: cfg.AppName, agent: cfg.Agent, sessionService: cfg.SessionService}, nil
 }
 
-// Run lazily saves user input and yields saved agent events from an existing session.
+// Run lazily saves user input and yields agent events from an existing session.
+// Complete events are saved before yielding; partial events are only forwarded.
 // Keep the message and returned events read-only. Serialize runs on the same session.
-func (r *Runner) Run(ctx context.Context, userID, sessionID string, message *model.Message) iter.Seq2[*session.Event, error] {
+func (r *Runner) Run(ctx context.Context, userID, sessionID string, message *model.Message, options ...RunOption) iter.Seq2[*session.Event, error] {
+	var cfg runOptions
+	for _, option := range options {
+		option(&cfg)
+	}
 	return func(yield func(*session.Event, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
@@ -67,7 +85,7 @@ func (r *Runner) Run(ctx context.Context, userID, sessionID string, message *mod
 			yield(nil, err)
 			return
 		}
-		invocation := &agent.InvocationContext{InvocationID: uuid.NewString(), Session: response.Session}
+		invocation := &agent.InvocationContext{InvocationID: uuid.NewString(), Session: response.Session, Streaming: cfg.streaming}
 		input := session.NewEvent(invocation.InvocationID)
 		input.Author = "user"
 		input.Message = message
@@ -84,9 +102,15 @@ func (r *Runner) Run(ctx context.Context, userID, sessionID string, message *mod
 				yield(nil, err)
 				return
 			}
-			if err := r.sessionService.AppendEvent(ctx, invocation.Session, event); err != nil {
-				yield(nil, fmt.Errorf("runner: save agent event: %w", err))
+			if event == nil {
+				yield(nil, fmt.Errorf("runner: agent returned a nil event"))
 				return
+			}
+			if !event.Partial {
+				if err := r.sessionService.AppendEvent(ctx, invocation.Session, event); err != nil {
+					yield(nil, fmt.Errorf("runner: save agent event: %w", err))
+					return
+				}
 			}
 			if !yield(event, nil) {
 				return

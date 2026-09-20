@@ -49,6 +49,99 @@ func resultStream(result model.Result) iter.Seq2[model.Event, error] {
 	return func(yield func(model.Event, error) bool) { yield(model.ResultEvent{Result: result}, nil) }
 }
 
+func TestStreamingEvents(t *testing.T) {
+	for _, mode := range []string{"complete", "early exit", "cancel", "model error"} {
+		t.Run(mode, func(t *testing.T) {
+			store, invocation := newInvocation(t)
+			invocation.Streaming = true
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			failure := errors.New("stream failed")
+			var updates []*session.Event
+			advanced, closed := false, false
+			llm := modelFunc(func(_ context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
+				if !stream {
+					t.Fatal("streaming option did not reach the model")
+				}
+				return func(yield func(model.Event, error) bool) {
+					defer func() { closed = true }()
+					for _, e := range []model.Event{
+						model.PartStart{Index: 0, Kind: model.PartThinking, ThinkingKind: model.ThinkingSummary},
+						model.ThinkingDelta{Index: 0, Delta: "Checking."}, model.PartEnd{Index: 0},
+						model.PartStart{Index: 1, Kind: model.PartText}, model.TextDelta{Index: 1, Delta: "hello"}, model.PartEnd{Index: 1},
+					} {
+						if !yield(e, nil) {
+							return
+						}
+					}
+					if mode == "model error" {
+						yield(nil, failure)
+						return
+					}
+					advanced = true
+					yield(model.ResultEvent{Result: model.Result{StopReason: model.StopReasonStop, Message: &model.Message{Role: model.RoleAssistant, Parts: []model.Part{
+						{Kind: model.PartThinking, Thinking: &model.ThinkingPart{Kind: model.ThinkingSummary, Text: "Checking."}}, model.NewTextPart("hello"),
+					}}}}, nil)
+				}
+			})
+			a, err := llmagent.New(llmagent.Config{Name: "streaming-agent", Model: llm})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var saved *session.Event
+			var runErr error
+			for event, err := range a.Run(ctx, invocation) {
+				if err != nil {
+					runErr = err
+					break
+				}
+				if event.Partial {
+					updates = append(updates, event)
+					if event.Message != nil || event.Delta == nil || invocation.Session.Events().Len() != 0 {
+						t.Fatal("partial event entered history or carried a complete message")
+					}
+					if mode == "early exit" {
+						break
+					}
+					if mode == "cancel" {
+						cancel()
+					}
+					continue
+				}
+				saved = event
+				if err := store.AppendEvent(ctx, invocation.Session, event); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !closed {
+				t.Fatal("model iterator was not closed")
+			}
+			if mode != "complete" {
+				var wantErr error
+				wantUpdates := 1
+				if mode == "cancel" {
+					wantErr = context.Canceled
+				}
+				if mode == "model error" {
+					wantErr, wantUpdates = failure, 6
+				}
+				if !errors.Is(runErr, wantErr) || advanced || saved != nil || len(updates) != wantUpdates || invocation.Session.Events().Len() != 0 {
+					t.Fatalf("incomplete generation: err=%v, updates=%d, advanced=%t", runErr, len(updates), advanced)
+				}
+				return
+			}
+			if runErr != nil || saved == nil || !advanced || len(updates) != 6 || invocation.Session.Events().Len() != 1 {
+				t.Fatalf("invalid completion: %v", runErr)
+			}
+			for _, update := range updates {
+				if !update.Partial || update.Delta == nil || update.ID != saved.ID || update.InvocationID != invocation.InvocationID || update.Author != saved.Author {
+					t.Fatal("partial event was mutated or its identity differs from the saved event")
+				}
+			}
+		})
+	}
+}
+
 func toolCallResult(calls ...model.ToolCallPart) model.Result {
 	message := &model.Message{Role: model.RoleAssistant}
 	for i := range calls {
