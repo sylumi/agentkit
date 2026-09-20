@@ -27,12 +27,16 @@ type Events interface {
 	At(index int) *Event
 }
 
-// Event records a complete message or generation outcome.
+// Event carries a live generation update or a complete message/outcome.
 type Event struct {
 	ID           string    `json:"id"`
 	InvocationID string    `json:"invocation_id"`
 	Author       string    `json:"author"`
 	Timestamp    time.Time `json:"timestamp"`
+	// Partial events carry Delta and share their eventual complete event's ID.
+	// They must not be saved as history or used to execute tools.
+	Partial bool        `json:"partial,omitempty"`
+	Delta   model.Event `json:"-"` // Encoded as a typed delta by MarshalJSON.
 
 	Message    *model.Message          `json:"message,omitempty"`
 	StopReason model.StopReason        `json:"stop_reason,omitempty"`

@@ -106,106 +106,153 @@ func TestNew(t *testing.T) {
 }
 
 func TestRunToolLoopAndNextTurn(t *testing.T) {
-	s := createSession(t)
-	getCalls, modelCalls, toolCalls := 0, 0, 0
-	service := serviceStub{Service: s, get: func(ctx context.Context, req *session.GetRequest) (*session.GetResponse, error) {
-		getCalls++
-		if ctx != t.Context() || *req != (session.GetRequest{AppName: "app", UserID: "user", SessionID: "session"}) {
-			t.Fatalf("session lookup: %+v", req)
-		}
-		return s.Get(ctx, req)
-	}}
-	weather, err := functiontool.New(functiontool.Config{Name: "weather"}, func(ctx context.Context, args struct {
-		City string `json:"city"`
-	}) (map[string]int, error) {
-		toolCalls++
-		if ctx != t.Context() || args.City != "Beijing" || history(t, s).Len() != 2 {
-			t.Fatal("tool ran before its call was saved or received the wrong input")
-		}
-		return map[string]int{"temperature": 25}, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var requests []model.Request
-	a, err := llmagent.New(llmagent.Config{
-		Name: "weather-agent", Tools: []tool.Tool{weather},
-		Model: modelFunc(func(ctx context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
-			modelCalls++
-			if ctx != t.Context() || stream || modelCalls > 3 {
-				t.Fatal("unexpected model call")
-			}
-			requests = append(requests, req)
-			if err := req.Validate(); err != nil {
-				t.Fatal(err)
-			}
-			if len(req.Messages) != 2*modelCalls-1 {
-				t.Fatalf("call %d received %d messages", modelCalls, len(req.Messages))
-			}
-			if modelCalls == 2 {
-				call := req.Messages[1].Parts[0].ToolCall
-				result := req.Messages[2].Parts[0].ToolResult
-				if call == nil || result == nil || call.ID != result.CallID || result.Content != `{"temperature":25}` || result.IsError {
-					t.Fatalf("tool round trip: call=%+v, result=%+v", call, result)
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprintf("streaming=%t", streaming), func(t *testing.T) {
+			s := createSession(t)
+			getCalls, modelCalls, toolCalls := 0, 0, 0
+			service := serviceStub{Service: s, get: func(ctx context.Context, req *session.GetRequest) (*session.GetResponse, error) {
+				getCalls++
+				if ctx != t.Context() || *req != (session.GetRequest{AppName: "app", UserID: "user", SessionID: "session"}) {
+					t.Fatalf("session lookup: %+v", req)
 				}
-			}
-			result := model.Result{
-				Message:    &model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("It is 25 C.")}},
-				StopReason: model.StopReasonStop,
-			}
-			if modelCalls == 1 {
-				result.StopReason = model.StopReasonToolCalls
-				result.Message.Parts = []model.Part{{Kind: model.PartToolCall, ToolCall: &model.ToolCallPart{
-					ID: "weather-1", Name: "weather", Arguments: json.RawMessage(`{"city":"Beijing"}`),
-				}}}
-			}
-			return func(yield func(model.Event, error) bool) { yield(model.ResultEvent{Result: result}, nil) }
-		}),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := runner.New(runner.Config{AppName: "app", Agent: a, SessionService: service})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var previousID string
-	for turn, text := range []string{"What is the weather in Beijing?", "Thanks."} {
-		input := userMessage(text)
-		outputs := r.Run(t.Context(), "user", "session", input)
-		before := history(t, s).Len()
-		if getCalls != turn || before != 4*turn {
-			t.Fatal("Run accessed the session before consumption")
-		}
-		count := 0
-		for event, err := range outputs {
+				return s.Get(ctx, req)
+			}}
+			weather, err := functiontool.New(functiontool.Config{Name: "weather"}, func(ctx context.Context, args struct {
+				City string `json:"city"`
+			}) (map[string]int, error) {
+				toolCalls++
+				if ctx != t.Context() || args.City != "Beijing" || history(t, s).Len() != 2 {
+					t.Fatal("tool ran before its call was saved or received the wrong input")
+				}
+				return map[string]int{"temperature": 25}, nil
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			count++
-			stored := history(t, s)
-			if stored.Len() != before+1+count || stored.At(stored.Len()-1).ID != event.ID || event.Author != a.Name() {
-				t.Fatal("event yielded before persistence or user input was yielded")
+			var requests []model.Request
+			a, err := llmagent.New(llmagent.Config{
+				Name: "weather-agent", Tools: []tool.Tool{weather},
+				Model: modelFunc(func(ctx context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
+					modelCalls++
+					if ctx != t.Context() || stream != streaming || modelCalls > 3 {
+						t.Fatal("unexpected model call")
+					}
+					requests = append(requests, req)
+					if err := req.Validate(); err != nil {
+						t.Fatal(err)
+					}
+					if len(req.Messages) != 2*modelCalls-1 {
+						t.Fatalf("call %d received %d messages", modelCalls, len(req.Messages))
+					}
+					if modelCalls == 2 {
+						call := req.Messages[1].Parts[0].ToolCall
+						result := req.Messages[2].Parts[0].ToolResult
+						if call == nil || result == nil || call.ID != result.CallID || result.Content != `{"temperature":25}` || result.IsError {
+							t.Fatalf("tool round trip: call=%+v, result=%+v", call, result)
+						}
+					}
+					result := model.Result{
+						Message:    &model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("It is 25 C.")}},
+						StopReason: model.StopReasonStop,
+					}
+					if modelCalls == 1 {
+						result.StopReason = model.StopReasonToolCalls
+						result.Message.Parts = []model.Part{{Kind: model.PartToolCall, ToolCall: &model.ToolCallPart{
+							ID: "weather-1", Name: "weather", Arguments: json.RawMessage(`{"city":"Beijing"}`),
+						}}}
+					}
+					return func(yield func(model.Event, error) bool) {
+						if stream {
+							part := result.Message.Parts[0]
+							var delta model.Event = model.TextDelta{Delta: "It is 25 C."}
+							if call := part.ToolCall; call != nil {
+								delta = model.ToolCallDelta{ID: call.ID, Name: call.Name, Arguments: string(call.Arguments)}
+							}
+							for _, event := range []model.Event{model.PartStart{Kind: part.Kind}, delta, model.PartEnd{}} {
+								if !yield(event, nil) {
+									return
+								}
+							}
+						}
+						yield(model.ResultEvent{Result: result}, nil)
+					}
+				}),
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
-			userEvent := stored.At(before)
-			if userEvent.Author != "user" || !reflect.DeepEqual(userEvent.Message, input) || event.InvocationID != userEvent.InvocationID {
-				t.Fatalf("invocation identity: user=%+v, output=%+v", userEvent, event)
+			// Runner must skip the storage call itself, including for custom services.
+			service.append = func(ctx context.Context, view session.Session, e *session.Event) error {
+				if e.Partial {
+					t.Fatal("Runner sent a partial event to storage")
+				}
+				return s.AppendEvent(ctx, view, e)
 			}
-			if _, err := uuid.Parse(event.InvocationID); err != nil || event.InvocationID == previousID {
-				t.Fatalf("invalid or reused invocation ID %q", event.InvocationID)
+			r, err := runner.New(runner.Config{AppName: "app", Agent: a, SessionService: service})
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		wantCount := 3
-		if turn == 1 {
-			wantCount = 1
-		}
-		if count != wantCount || getCalls != turn+1 || !reflect.DeepEqual(input, userMessage(text)) {
-			t.Fatalf("outputs=%d, lookups=%d, input=%+v", count, getCalls, input)
-		}
-		previousID = history(t, s).At(before).InvocationID
-	}
-	if modelCalls != 3 || toolCalls != 1 || history(t, s).Len() != 6 || len(requests[0].Messages) != 1 || len(requests[1].Messages) != 3 {
-		t.Fatalf("models=%d, tools=%d, history=%d", modelCalls, toolCalls, history(t, s).Len())
+			var previousID string
+			for turn, text := range []string{"What is the weather in Beijing?", "Thanks."} {
+				input := userMessage(text)
+				var options []runner.RunOption
+				if streaming {
+					options = append(options, runner.WithStreaming(true))
+				}
+				outputs := r.Run(t.Context(), "user", "session", input, options...)
+				before := history(t, s).Len()
+				if getCalls != turn || before != 4*turn {
+					t.Fatal("Run accessed the session before consumption")
+				}
+				count, partials := 0, 0
+				for event, err := range outputs {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if event.Partial {
+						partials++
+						if history(t, s).Len() != before+1+count {
+							t.Fatal("partial entered next-turn history")
+						}
+						continue
+					}
+					count++
+					stored := history(t, s)
+					if stored.Len() != before+1+count || stored.At(stored.Len()-1).ID != event.ID || event.Author != a.Name() {
+						t.Fatal("event yielded before persistence or user input was yielded")
+					}
+					userEvent := stored.At(before)
+					if userEvent.Author != "user" || !reflect.DeepEqual(userEvent.Message, input) || event.InvocationID != userEvent.InvocationID {
+						t.Fatalf("invocation identity: user=%+v, output=%+v", userEvent, event)
+					}
+					if _, err := uuid.Parse(event.InvocationID); err != nil || event.InvocationID == previousID {
+						t.Fatalf("invalid or reused invocation ID %q", event.InvocationID)
+					}
+				}
+				wantCount := 3
+				if turn == 1 {
+					wantCount = 1
+				}
+				wantPartials := 0
+				if streaming {
+					wantPartials = 3
+					if turn == 0 {
+						wantPartials = 6
+					}
+				}
+				if partials != wantPartials {
+					t.Fatalf("partials=%d, want %d", partials, wantPartials)
+				}
+				if count != wantCount || getCalls != turn+1 || !reflect.DeepEqual(input, userMessage(text)) {
+					t.Fatalf("outputs=%d, lookups=%d, input=%+v", count, getCalls, input)
+				}
+				previousID = history(t, s).At(before).InvocationID
+			}
+			if modelCalls != 3 || toolCalls != 1 || history(t, s).Len() != 6 || len(requests[0].Messages) != 1 || len(requests[1].Messages) != 3 {
+				t.Fatalf("models=%d, tools=%d, history=%d", modelCalls, toolCalls, history(t, s).Len())
+			}
+
+		})
 	}
 }
 

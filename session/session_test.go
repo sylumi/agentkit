@@ -79,3 +79,33 @@ func TestEventJSONAndAppendPreserveContent(t *testing.T) {
 		t.Fatal("event ID was reused")
 	}
 }
+
+func TestPartialEventsRoundTripWithoutPersistence(t *testing.T) {
+	service, view := createSession(t, "stream")
+	updated := view.LastUpdateTime()
+	for _, delta := range []model.Event{
+		model.PartStart{Index: 0, Kind: model.PartThinking, ThinkingKind: model.ThinkingSummary},
+		model.ThinkingDelta{Index: 0, Delta: "Checking"},
+		model.TextDelta{Index: 1, Delta: "Hello"},
+		model.ToolCallDelta{Index: 2, ID: "call", Name: "lookup", Arguments: `{"city":`},
+		model.PartEnd{Index: 0},
+	} {
+		event := session.NewEvent("run")
+		event.Author, event.Partial, event.Delta = "agent", true, delta
+		data, err := json.Marshal(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded session.Event
+		if err := json.Unmarshal(data, &decoded); err != nil || !reflect.DeepEqual(event, &decoded) {
+			t.Fatalf("partial event changed during JSON round trip: %s, %v", data, err)
+		}
+		if err := service.AppendEvent(t.Context(), view, &decoded); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored := getSession(t, service, view)
+	if view.Events().Len() != 0 || stored.Events().Len() != 0 || !view.LastUpdateTime().Equal(updated) || !stored.LastUpdateTime().Equal(updated) {
+		t.Fatal("partial events changed session history or update time")
+	}
+}

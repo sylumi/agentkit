@@ -89,15 +89,23 @@ func (a *llmAgent) Run(ctx context.Context, invocation *agent.InvocationContext)
 				yield(nil, fmt.Errorf("llmagent: model call limit reached (%d)", a.maxModelCalls))
 				return
 			}
-			event, err := a.generate(ctx, invocation, definitions)
-			if err != nil {
-				yield(nil, err)
+			var complete *session.Event
+			for event, err := range a.generate(ctx, invocation, definitions) {
+				if err != nil {
+					yield(nil, err)
+					return
+				}
+				if !yield(event, nil) {
+					return
+				}
+				if !event.Partial {
+					complete = event
+				}
+			}
+			if complete == nil || complete.StopReason != model.StopReasonToolCalls {
 				return
 			}
-			if !yield(event, nil) || event.StopReason != model.StopReasonToolCalls {
-				return
-			}
-			for _, part := range event.Message.Parts {
+			for _, part := range complete.Message.Parts {
 				if part.Kind != model.PartToolCall {
 					continue
 				}
@@ -120,29 +128,64 @@ func (a *llmAgent) Run(ctx context.Context, invocation *agent.InvocationContext)
 	}
 }
 
-func (a *llmAgent) generate(ctx context.Context, invocation *agent.InvocationContext, definitions []model.ToolDefinition) (*session.Event, error) {
-	req := model.Request{
-		Instructions: a.instruction,
-		Tools:        definitions,
-		Config:       a.generateConfig,
-	}
-	for event := range invocation.Session.Events().All() {
-		if event.Message != nil {
-			req.Messages = append(req.Messages, *event.Message)
+func (a *llmAgent) generate(ctx context.Context, invocation *agent.InvocationContext, definitions []model.ToolDefinition) iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
+		req := model.Request{
+			Instructions: a.instruction,
+			Tools:        definitions,
+			Config:       a.generateConfig,
 		}
-	}
-	for output, err := range a.model.Generate(ctx, req, false) {
-		if err != nil {
-			return nil, err
+		for event := range invocation.Session.Events().All() {
+			if event.Message != nil {
+				req.Messages = append(req.Messages, *event.Message)
+			}
 		}
-		result := output.(model.ResultEvent).Result
 		event := session.NewEvent(invocation.InvocationID)
 		event.Author = a.name
-		event.Message = result.Message
-		event.StopReason = result.StopReason
-		event.Usage = &result.Usage
-		event.Metadata = result.Metadata
-		return event, nil
+		var generationErr error
+		finished := false
+		for output, err := range a.model.Generate(ctx, req, invocation.Streaming) {
+			if err != nil {
+				generationErr = err
+				break
+			}
+			if err := ctx.Err(); err != nil {
+				generationErr = err
+				break
+			}
+			if err := model.ValidateEvent(output); err != nil {
+				generationErr = fmt.Errorf("llmagent: model event: %w", err)
+				break
+			}
+			complete, ok := output.(model.ResultEvent)
+			if !ok {
+				if invocation.Streaming {
+					partial := *event
+					partial.Partial = true
+					partial.Delta = output
+					if !yield(&partial, nil) {
+						return
+					}
+				}
+				continue
+			}
+			result := complete.Result
+			event.Message = result.Message
+			event.StopReason = result.StopReason
+			event.Usage = &result.Usage
+			event.Metadata = result.Metadata
+			finished = true
+			break
+		}
+		// Close the model iterator before handing off a final outcome or error.
+		if generationErr != nil {
+			yield(nil, generationErr)
+			return
+		}
+		if !finished {
+			yield(nil, fmt.Errorf("llmagent: model returned no result"))
+			return
+		}
+		yield(event, nil)
 	}
-	return nil, fmt.Errorf("llmagent: model returned no result")
 }

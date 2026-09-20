@@ -108,6 +108,9 @@ func (s *inMemoryService) AppendEvent(ctx context.Context, current Session, even
 	if event == nil {
 		return fmt.Errorf("session: event is required")
 	}
+	if event.Partial {
+		return nil
+	}
 	storedEvent := *event
 
 	s.mu.Lock()
