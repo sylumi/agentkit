@@ -1,1 +1,3 @@
 modelcatalog/data/models.json linguist-generated=true
+web/** linguist-vendored=true
+web/dist/** linguist-generated=true
