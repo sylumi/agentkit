@@ -16,6 +16,7 @@ type Service interface {
 	Create(context.Context, *CreateRequest) (*CreateResponse, error)
 	Get(context.Context, *GetRequest) (*GetResponse, error)
 	List(context.Context, *ListRequest) (*ListResponse, error)
+	// Delete removes a session. A valid request for a missing session returns nil.
 	Delete(context.Context, *DeleteRequest) error
 	// AppendEvent commits a complete event, then updates the supplied view.
 	// Partial events are ignored without changing history or update times.
