@@ -7,7 +7,6 @@ import { ConversationHome } from './features/conversation/ConversationHome'
 import { SidebarToggleButton } from './shared/ui/SidebarToggleButton'
 import { cn } from './lib/utils'
 import { useSession } from './useSession'
-import { pairTools } from './history'
 import { ConversationThread } from './features/conversation/ConversationThread'
 
 type Theme = 'light' | 'dark' | 'system'
@@ -59,7 +58,6 @@ export function App() {
   const openPanel = (next: Panel) => { setMobileOpen(false); setPanel(next) }
   const newSession = () => { chat.newSession(); setMobileOpen(false) }
   const events = chat.current?.events ?? []
-  const incomplete = !chat.busy && pairTools(events).incomplete
   const tooLong = [...chat.draft].length > 4000
   const title = chat.current ? (chat.titles[chat.current.id] ?? 'Session') : 'New session'
   const status = chat.phase === 'running' ? 'Agent is running' : chat.phase === 'stopping' ? 'Stopping…'
@@ -69,13 +67,12 @@ export function App() {
   const composer = <Composer value={chat.draft} onChange={chat.setDraft}
     onOpenModel={() => openPanel('model')}
     onSend={chat.send} onStop={chat.stop} busy={chat.busy}
-    canSend={chat.ready && !chat.busy && !incomplete && !tooLong && !!chat.draft.trim()}
+    canSend={chat.ready && !chat.busy && !tooLong && !!chat.draft.trim()}
     canStop={chat.phase === 'running'} model={chat.agent?.model}
     status={status} />
-  const notice = (chat.error || incomplete) && <div role="status" className="mx-auto mb-3 w-full max-w-[750px] text-[0.8125rem] leading-5 text-ink-muted">
-    <p>{incomplete ? 'A tool call has no result. Start a new session to continue.' : chat.error}</p>
-    {incomplete ? <button type="button" className="mt-1 cursor-pointer underline underline-offset-4" onClick={newSession}>New session</button>
-      : (chat.phase === 'idle' || chat.phase === 'unsynced') && <button type="button" className="mt-1 cursor-pointer underline underline-offset-4" onClick={chat.refresh}>{chat.ready ? 'Refresh status' : 'Reconnect'}</button>}
+  const notice = chat.error && <div role="status" className="mx-auto mb-3 w-full max-w-[750px] text-[0.8125rem] leading-5 text-ink-muted">
+    <p>{chat.error}</p>
+    {(chat.phase === 'idle' || chat.phase === 'unsynced') && <button type="button" className="mt-1 cursor-pointer underline underline-offset-4" onClick={chat.refresh}>{chat.ready ? 'Refresh status' : 'Reconnect'}</button>}
   </div>
   const sidebar = (mobile = false) => <AppSidebar
     onCollapse={() => mobile ? setMobileOpen(false) : setSidebarOpen(false)}

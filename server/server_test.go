@@ -354,52 +354,6 @@ func TestLLMAgentToolsAcrossTurns(t *testing.T) {
 	}
 }
 
-func TestIncompleteToolHistory(t *testing.T) {
-	for _, kind := range []string{"pending", "matched", "reused", "different-invocation", "result-before-call"} {
-		t.Run(kind, func(t *testing.T) {
-			h, store := newServer(t, agentFunc(echoAgent))
-			id := create(t, h)
-			loaded, err := store.Get(t.Context(), &session.GetRequest{AppName: "test", UserID: "user", SessionID: id})
-			if err != nil {
-				t.Fatal(err)
-			}
-			call := func(inv string) *session.Event {
-				e := session.NewEvent(inv)
-				e.Message = &model.Message{Role: model.RoleAssistant, Parts: []model.Part{{Kind: model.PartToolCall, ToolCall: &model.ToolCallPart{ID: "same", Name: "add", Arguments: json.RawMessage(`{}`)}}}}
-				return e
-			}
-			result := func(inv string) *session.Event {
-				e := session.NewEvent(inv)
-				e.Message = &model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartToolResult, ToolResult: &model.ToolResultPart{CallID: "same", Content: "0"}}}}
-				return e
-			}
-			events := []*session.Event{call("a")}
-			status := 409
-			switch kind {
-			case "matched":
-				events = append(events, result("a"))
-				status = 200
-			case "reused":
-				events = append(events, result("a"), call("a"), result("a"))
-				status = 200
-			case "different-invocation":
-				events = append(events, result("b"))
-			case "result-before-call":
-				events = []*session.Event{result("a"), call("a")}
-			}
-			for _, e := range events {
-				if err := store.AppendEvent(t.Context(), loaded.Session, e); err != nil {
-					t.Fatal(err)
-				}
-			}
-			w := request(t, h, "POST", "/api/sessions/"+id+"/run", `{"text":"hi"}`, status)
-			if status == 409 && !strings.Contains(w.Body.String(), "incomplete_tool_history") {
-				t.Fatal(w.Body)
-			}
-		})
-	}
-}
-
 type brokenWriter struct {
 	*httptest.ResponseRecorder
 	writes int

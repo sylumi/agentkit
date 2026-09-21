@@ -31,7 +31,7 @@ export function pairTools(events: SessionEvent[]) {
       }
     })
   }
-  return { calls, results, incomplete: [...calls.values()].some(pair => !pair.result) }
+  return { calls, results }
 }
 
 export function sessionTitle(events: SessionEvent[]): string {

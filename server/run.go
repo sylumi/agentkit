@@ -39,13 +39,9 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	loaded, err := s.store.Get(r.Context(), &session.GetRequest{AppName: s.appName, UserID: s.userID, SessionID: id})
+	_, err := s.store.Get(r.Context(), &session.GetRequest{AppName: s.appName, UserID: s.userID, SessionID: id})
 	if err != nil {
 		storageError(w, err)
-		return
-	}
-	if incompleteTools(loaded.Session.Events()) {
-		fail(w, http.StatusConflict, "incomplete_tool_history", "This session has a tool call without a result. Start a new session to continue.")
 		return
 	}
 	ctx := r.Context()
@@ -115,28 +111,4 @@ func runError(err error) done {
 		return done{Status: "error", Error: &apiError{"run_timeout", "The run reached its time limit."}}
 	}
 	return done{Status: "error", Error: &apiError{"run_failed", "Agent execution failed. Check the server log for details."}}
-}
-
-func incompleteTools(events session.Events) bool {
-	type key struct{ invocation, call string }
-	pending := make(map[key]int)
-	for event := range events.All() {
-		if event.Message == nil {
-			continue
-		}
-		for _, part := range event.Message.Parts {
-			if part.ToolCall != nil {
-				pending[key{event.InvocationID, part.ToolCall.ID}]++
-			}
-			if part.ToolResult != nil {
-				k := key{event.InvocationID, part.ToolResult.CallID}
-				if pending[k] > 1 {
-					pending[k]--
-				} else {
-					delete(pending, k)
-				}
-			}
-		}
-	}
-	return len(pending) != 0
 }
