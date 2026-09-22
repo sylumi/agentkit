@@ -11,23 +11,30 @@ import (
 	"github.com/sylumi/agentkit/session"
 )
 
-type summary struct {
+type sessionSummary struct {
 	ID        string    `json:"id"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Running   bool      `json:"running"`
 }
 
-type snapshot struct {
-	summary
+type sessionSnapshot struct {
+	sessionSummary
 	Events []*session.Event `json:"events"`
 }
 
-func toSnapshot(current session.Session, running bool) snapshot {
+func toSessionSnapshot(current session.Session, running bool) sessionSnapshot {
 	events := make([]*session.Event, 0, current.Events().Len())
 	for event := range current.Events().All() {
 		events = append(events, event)
 	}
-	return snapshot{summary{current.ID(), current.LastUpdateTime(), running}, events}
+	return sessionSnapshot{
+		sessionSummary: sessionSummary{
+			ID:        current.ID(),
+			UpdatedAt: current.LastUpdateTime(),
+			Running:   running,
+		},
+		Events: events,
+	}
 }
 
 func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +47,7 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply(w, http.StatusCreated, toSnapshot(created.Session, false))
+	reply(w, http.StatusCreated, toSessionSnapshot(created.Session, false))
 }
 
 func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
@@ -49,34 +56,38 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		storageError(w, err)
 		return
 	}
-	items := make([]summary, 0, len(listed.Sessions))
+	items := make([]sessionSummary, 0, len(listed.Sessions))
 	s.mu.Lock()
 	for _, current := range listed.Sessions {
-		items = append(items, summary{current.ID(), current.LastUpdateTime(), s.active[current.ID()]})
+		items = append(items, sessionSummary{
+			ID:        current.ID(),
+			UpdatedAt: current.LastUpdateTime(),
+			Running:   s.active[current.ID()],
+		})
 	}
 	s.mu.Unlock()
-	slices.SortFunc(items, func(a, b summary) int {
+	slices.SortFunc(items, func(a, b sessionSummary) int {
 		if order := b.UpdatedAt.Compare(a.UpdatedAt); order != 0 {
 			return order
 		}
 		return cmp.Compare(a.ID, b.ID)
 	})
 	reply(w, http.StatusOK, struct {
-		Sessions []summary `json:"sessions"`
-	}{items})
+		Sessions []sessionSummary `json:"sessions"`
+	}{Sessions: items})
 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	s.mu.Lock()
 	loaded, err := s.store.Get(r.Context(), &session.GetRequest{AppName: s.appName, UserID: s.userID, SessionID: id})
-	running := s.active[id]
-	s.mu.Unlock()
 	if err != nil {
 		storageError(w, err)
 		return
 	}
-	reply(w, http.StatusOK, toSnapshot(loaded.Session, running))
+	s.mu.Lock()
+	running := s.active[id]
+	s.mu.Unlock()
+	reply(w, http.StatusOK, toSessionSnapshot(loaded.Session, running))
 }
 
 func (s *Server) deleteSession(w http.ResponseWriter, r *http.Request) {
