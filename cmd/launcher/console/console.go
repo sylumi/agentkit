@@ -108,7 +108,7 @@ func runTurn(ctx context.Context, r *runner.Runner, cfg launcher.Config, session
 			}
 		}
 		if event.StopReason != "" && event.StopReason != model.StopReasonStop && event.StopReason != model.StopReasonToolCalls {
-			return fmt.Errorf("generation ended with %s", event.StopReason)
+			fmt.Fprintf(output, "\n[Notice: Generation ended with %s]\n", event.StopReason)
 		}
 	}
 	return nil
