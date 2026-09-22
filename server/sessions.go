@@ -124,7 +124,7 @@ func (s *Server) reserve(id string) (release func(), ok bool) {
 func storageError(w http.ResponseWriter, err error) {
 	if errors.Is(err, session.ErrNotFound) {
 		fail(w, http.StatusNotFound, codeSessionNotFound, "Session not found.")
-	} else {
-		fail(w, http.StatusInternalServerError, codeStorageError, "Session storage operation failed.")
+		return
 	}
+	fail(w, http.StatusInternalServerError, codeStorageError, "Session storage operation failed.")
 }
