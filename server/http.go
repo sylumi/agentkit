@@ -6,12 +6,40 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"time"
 )
 
 const (
-	codeSessionBusy     = "session_busy"
-	codeSessionNotFound = "session_not_found"
-	codeStorageError    = "storage_error"
+	defaultMaxInputRunes = 4000
+	defaultWriteTimeout  = 10 * time.Second
+	maxRequestBodyBytes  = 64 << 10
+)
+
+const (
+	codeInvalidRequest       = "invalid_request"
+	codeInvalidText          = "invalid_text"
+	codeRequestTooLarge      = "request_too_large"
+	codeRunFailed            = "run_failed"
+	codeRunTimeout           = "run_timeout"
+	codeSessionBusy          = "session_busy"
+	codeSessionNotFound      = "session_not_found"
+	codeStorageError         = "storage_error"
+	codeUnsupportedMediaType = "unsupported_media_type"
+)
+
+// RunStatus identifies the terminal state of an agent execution run.
+type RunStatus string
+
+const (
+	StatusFinished  RunStatus = "finished"
+	StatusCancelled RunStatus = "cancelled"
+	StatusError     RunStatus = "error"
+)
+
+const (
+	sseEventData = "event"
+	sseEventDone = "done"
+	sseConnected = ": connected\n\n"
 )
 
 type apiError struct {
@@ -34,10 +62,10 @@ func fail(w http.ResponseWriter, status int, code, message string) {
 func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || kind != "application/json" {
-		fail(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Use application/json.")
+		fail(w, http.StatusUnsupportedMediaType, codeUnsupportedMediaType, "Use application/json.")
 		return false
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(value); err == nil {
@@ -47,9 +75,9 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	}
 	var sizeError *http.MaxBytesError
 	if errors.As(err, &sizeError) {
-		fail(w, http.StatusRequestEntityTooLarge, "request_too_large", "Request body exceeds 64 KiB.")
+		fail(w, http.StatusRequestEntityTooLarge, codeRequestTooLarge, "Request body exceeds 64 KiB.")
 	} else {
-		fail(w, http.StatusBadRequest, "invalid_request", "Expected one JSON object with supported fields.")
+		fail(w, http.StatusBadRequest, codeInvalidRequest, "Expected one JSON object with supported fields.")
 	}
 	return false
 }

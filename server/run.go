@@ -17,7 +17,7 @@ import (
 )
 
 type done struct {
-	Status string    `json:"status"`
+	Status RunStatus `json:"status"`
 	Error  *apiError `json:"error,omitempty"`
 }
 
@@ -28,8 +28,8 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if strings.TrimSpace(body.Text) == "" || utf8.RuneCountInString(body.Text) > 4000 {
-		fail(w, http.StatusBadRequest, "invalid_text", "Text must contain 1 to 4000 characters and cannot be blank.")
+	if strings.TrimSpace(body.Text) == "" || utf8.RuneCountInString(body.Text) > defaultMaxInputRunes {
+		fail(w, http.StatusBadRequest, codeInvalidText, "Text must contain 1 to 4000 characters and cannot be blank.")
 		return
 	}
 	id := r.PathValue("id")
@@ -45,29 +45,33 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
+
 	rc := http.NewResponseController(w)
 	if err := writeDeadline(rc); err != nil {
 		return
 	}
-	if _, err := fmt.Fprint(w, ": connected\n\n"); err != nil {
+	if _, err := fmt.Fprint(w, sseConnected); err != nil {
 		return
 	}
 	if err := rc.Flush(); err != nil {
 		return
 	}
+
 	input := &model.Message{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart(body.Text)}}
-	result := done{Status: "finished"}
+	result := done{Status: StatusFinished}
+
 	for event, err := range s.runner.Run(ctx, s.userID, id, input, runner.WithStreaming(true)) {
 		if err != nil {
 			result = runError(err)
-			if result.Error != nil && result.Error.Code == "run_failed" {
+			if result.Error != nil && result.Error.Code == codeRunFailed {
 				slog.ErrorContext(ctx, "agent run failed", "session_id", id, "error", err)
 			}
 			break
 		}
-		if err := emit(w, rc, "event", event); err != nil {
+		if err := emit(w, rc, sseEventData, event); err != nil {
 			return // Leaving the iterator stops further model and tool calls.
 		}
 	}
@@ -76,7 +80,7 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	}
 	// No more events can be committed by this run after releasing its slot.
 	release()
-	_ = emit(w, rc, "done", result)
+	_ = emit(w, rc, sseEventDone, result)
 }
 
 func emit(w http.ResponseWriter, rc *http.ResponseController, kind string, value any) error {
@@ -96,7 +100,7 @@ func emit(w http.ResponseWriter, rc *http.ResponseController, kind string, value
 }
 
 func writeDeadline(rc *http.ResponseController) error {
-	err := rc.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	err := rc.SetWriteDeadline(time.Now().Add(defaultWriteTimeout))
 	if errors.Is(err, http.ErrNotSupported) {
 		return nil
 	}
@@ -105,10 +109,10 @@ func writeDeadline(rc *http.ResponseController) error {
 
 func runError(err error) done {
 	if errors.Is(err, context.Canceled) {
-		return done{Status: "cancelled"}
+		return done{Status: StatusCancelled}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return done{Status: "error", Error: &apiError{"run_timeout", "The run reached its time limit."}}
+		return done{Status: StatusError, Error: &apiError{codeRunTimeout, "The run reached its time limit."}}
 	}
-	return done{Status: "error", Error: &apiError{"run_failed", "Agent execution failed. Check the server log for details."}}
+	return done{Status: StatusError, Error: &apiError{codeRunFailed, "Agent execution failed. Check the server log for details."}}
 }
