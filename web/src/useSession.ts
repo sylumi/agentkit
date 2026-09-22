@@ -125,12 +125,23 @@ export function useSession() {
       const [info, listed] = await Promise.all([api.agent(signal), api.sessions(signal)])
       if (!valid(token)) return
       setAgent(info); setSessions(listed.sessions); setReady(true)
-      const id = currentRef.current?.id ?? remembered()
-      if (id) { phaseTo('syncing'); await sync(id, token, signal) }
-      else { show(undefined); phaseTo('idle') }
+      const rememberedID = remembered()
+      const candidateID = currentRef.current?.id ?? rememberedID
+      if (candidateID && listed.sessions.some(item => item.id === candidateID)) {
+        phaseTo('syncing')
+        await sync(candidateID, token, signal)
+      } else {
+        if (rememberedID && !currentRef.current) remember(undefined)
+        if (currentRef.current?.id) {
+          syncFailure(new APIError(404, 'session_not_found', 'Session not found.'), token)
+        } else {
+          show(undefined)
+          phaseTo('idle')
+        }
+      }
     } catch (cause) {
       if (!valid(token)) return
-      if (currentRef.current || remembered() || submission.current) syncFailure(cause, token)
+      if (currentRef.current || submission.current) syncFailure(cause, token)
       else { setError('Cannot reach the backend. Start the Go API, then reconnect.'); setReady(false); phaseTo('idle') }
     }
   }
