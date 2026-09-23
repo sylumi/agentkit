@@ -20,12 +20,21 @@ type Tool interface {
 	Execute(ctx context.Context, arguments json.RawMessage) (string, error)
 }
 
-// Toolset provides a named collection of tools.
+// Toolset groups tools and must support concurrent runs.
 type Toolset interface {
 	// Name identifies the collection without renaming its tools.
 	Name() string
 
-	// Tools discovers tools for the current call, honoring ctx cancellation.
-	// The caller owns the returned slice; tool instances may be shared.
+	// Tools discovers tools once per LLM agent Run and honors cancellation.
+	// The caller owns the slice; tool instances may be shared.
 	Tools(ctx context.Context) ([]Tool, error)
+}
+
+// RequestProcessor lets a Toolset enrich each fresh request before generation.
+// Processors run in configured order, even for empty toolsets; errors stop the run.
+type RequestProcessor interface {
+	// ProcessRequest honors cancellation and supports concurrent calls.
+	// Do not retain req or add or rename tools.
+	// Copy shared history, config, or tool definitions before modifying them.
+	ProcessRequest(ctx context.Context, req *model.Request) error
 }
