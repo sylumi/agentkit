@@ -79,14 +79,15 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	// Keep run completion from pairing an older history with running=false.
+	s.mu.Lock()
 	loaded, err := s.store.Get(r.Context(), &session.GetRequest{AppName: s.appName, UserID: s.userID, SessionID: id})
+	running := s.active[id]
+	s.mu.Unlock()
 	if err != nil {
 		storageError(w, err)
 		return
 	}
-	s.mu.Lock()
-	running := s.active[id]
-	s.mu.Unlock()
 	reply(w, http.StatusOK, toSessionSnapshot(loaded.Session, running))
 }
 

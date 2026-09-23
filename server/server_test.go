@@ -476,3 +476,77 @@ func TestLiveStreamArrivesBeforeFinalCommit(t *testing.T) {
 		t.Fatal("final output did not replace the preview")
 	}
 }
+
+type snapshotStore struct {
+	session.Service
+	readContext context.Context
+	read        chan struct{}
+	resume      chan struct{}
+}
+
+func (s *snapshotStore) Get(ctx context.Context, req *session.GetRequest) (*session.GetResponse, error) {
+	response, err := s.Service.Get(ctx, req)
+	if ctx == s.readContext {
+		close(s.read)
+		<-s.resume
+	}
+	return response, err
+}
+
+func TestSessionSnapshotDuringRunCompletion(t *testing.T) {
+	readContext, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	store := &snapshotStore{
+		Service: session.InMemoryService(), readContext: readContext,
+		read: make(chan struct{}), resume: make(chan struct{}),
+	}
+	started, finish, committed := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	a := agentFunc(func(ctx context.Context, inv *agent.InvocationContext) iter.Seq2[*session.Event, error] {
+		return func(yield func(*session.Event, error) bool) {
+			close(started)
+			<-finish
+			echoAgent(ctx, inv)(yield)
+			close(committed)
+		}
+	})
+	h, err := server.New(server.Config{AppName: "test", Agent: a, SessionService: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := create(t, h)
+	runDone := make(chan struct{})
+	go func() {
+		defer close(runDone)
+		request(t, h, "POST", "/api/sessions/"+id+"/run", `{"text":"hi"}`, 200)
+	}()
+	<-started
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/api/sessions/"+id, nil).WithContext(readContext)
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		h.ServeHTTP(w, r)
+	}()
+	<-store.read // The stored snapshot contains only the user input.
+	close(finish)
+	<-committed // The final reply is now persisted, but absent from that snapshot.
+	// Give completion a chance to release the run. A consistent snapshot keeps
+	// the release blocked until its history and running state have been read.
+	select {
+	case <-runDone:
+	case <-time.After(time.Second):
+	}
+	close(store.resume)
+	<-readDone
+	<-runDone
+
+	during := decodeSnapshot(t, w)
+	if !during.Running || len(during.Events) != 1 {
+		t.Fatalf("snapshot with unfinished history must still be running: %+v", during)
+	}
+	after := decodeSnapshot(t, request(t, h, "GET", "/api/sessions/"+id, "", 200))
+	if after.Running || len(after.Events) != 2 || after.Events[1].Message.Role != model.RoleAssistant {
+		t.Fatalf("completed snapshot must include the final reply: %+v", after)
+	}
+}
