@@ -35,7 +35,7 @@ func TestReasoningRequests(t *testing.T) {
 		{"V4 Flash low", "deepseek", "deepseek-v4-flash", &model.ReasoningConfig{Effort: "low"}, "low", ""},
 		{"explicit effort with on", "deepseek", "deepseek-flash", &model.ReasoningConfig{Enabled: &on, Effort: "low"}, "low", ""},
 		{"Pro max", "deepseek", "deepseek-v4-pro", &model.ReasoningConfig{Effort: "max"}, "max", ""},
-		{"Pro rejects low", "deepseek", "deepseek-v4-pro", &model.ReasoningConfig{Effort: "low"}, "", "supported intensities: [high max]"},
+		{"Pro rejects medium", "deepseek", "deepseek-v4-pro", &model.ReasoningConfig{Effort: "medium"}, "", "supported intensities: [low high max]"},
 		{"no automatic clamping", "deepseek", "deepseek-flash", &model.ReasoningConfig{Effort: "medium"}, "", "unsupported intensity"},
 		{"MiMo default", "xiaomi", "mimo-v2.5", nil, "", ""},
 		{"MiMo on needs effort", "xiaomi", "mimo-v2.5", &model.ReasoningConfig{Enabled: &on}, "", "set an explicit intensity"},
