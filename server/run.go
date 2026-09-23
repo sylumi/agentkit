@@ -56,7 +56,7 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	if _, err := fmt.Fprint(w, sseConnected); err != nil {
 		return
 	}
-	if err := rc.Flush(); err != nil {
+	if err := flushSSE(rc); err != nil {
 		return
 	}
 
@@ -96,7 +96,19 @@ func emit(w http.ResponseWriter, rc *http.ResponseController, kind string, value
 	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", kind, data); err != nil {
 		return err
 	}
-	return rc.Flush()
+	return flushSSE(rc)
+}
+
+func flushSSE(rc *http.ResponseController) error {
+	if err := rc.Flush(); err != nil {
+		return err
+	}
+	// The write timeout must not include idle time waiting for the next event.
+	err := rc.SetWriteDeadline(time.Time{})
+	if errors.Is(err, http.ErrNotSupported) {
+		return nil
+	}
+	return err
 }
 
 func writeDeadline(rc *http.ResponseController) error {

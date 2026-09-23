@@ -550,3 +550,68 @@ func TestSessionSnapshotDuringRunCompletion(t *testing.T) {
 		t.Fatalf("completed snapshot must include the final reply: %+v", after)
 	}
 }
+
+func TestHTTP2StreamSurvivesIdle(t *testing.T) {
+	for _, afterEvent := range []bool{false, true} {
+		name := "after_connection"
+		if afterEvent {
+			name = "after_event"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			a := agentFunc(func(ctx context.Context, inv *agent.InvocationContext) iter.Seq2[*session.Event, error] {
+				return func(yield func(*session.Event, error) bool) {
+					if afterEvent {
+						e := session.NewEvent(inv.InvocationID)
+						e.Partial = true
+						e.Delta = model.TextDelta{Index: 0, Delta: "thinking"}
+						if !yield(e, nil) {
+							return
+						}
+					}
+					// Exceed the server's 10-second write timeout while no write
+					// is pending, as a slow model or tool might do.
+					timer := time.NewTimer(11 * time.Second)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+						echoAgent(ctx, inv)(yield)
+					case <-ctx.Done():
+					}
+				}
+			})
+			h, _ := newServer(t, a)
+			id := create(t, h)
+			srv := httptest.NewUnstartedServer(h)
+			srv.EnableHTTP2 = true
+			srv.StartTLS()
+			defer srv.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+			defer cancel()
+			r, err := http.NewRequestWithContext(ctx, "POST", srv.URL+"/api/sessions/"+id+"/run", strings.NewReader(`{"text":"wait"}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set("Content-Type", "application/json")
+			resp, err := srv.Client().Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.ProtoMajor != 2 || resp.StatusCode != http.StatusOK {
+				t.Fatalf("expected HTTP/2 SSE response, got %s %s", resp.Proto, resp.Status)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("stream closed during idle: %v; body: %s", err, body)
+			}
+			wantEvents := 1
+			if afterEvent {
+				wantEvents++
+			}
+			if strings.Count(string(body), "event: event\n") != wantEvents || !strings.Contains(string(body), "event: done\ndata: {\"status\":\"finished\"}") {
+				t.Fatalf("stream did not finish after idle: %s", body)
+			}
+		})
+	}
+}
