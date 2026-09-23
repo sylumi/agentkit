@@ -24,6 +24,9 @@ type Config struct {
 	Instruction string
 
 	Tools []tool.Tool
+	// Toolsets are discovered once per Run, after Tools. Names must be unique
+	// across all sources.
+	Toolsets []tool.Toolset
 	// GenerateConfig and its nested data must remain unchanged during Run.
 	GenerateConfig *model.GenerateConfig
 	// MaxModelCalls limits model calls per Run; zero defaults to 10.
@@ -36,6 +39,7 @@ type llmAgent struct {
 	model          model.LLM
 	instruction    string
 	tools          []tool.Tool
+	toolsets       []tool.Toolset
 	generateConfig *model.GenerateConfig
 	maxModelCalls  int
 }
@@ -60,6 +64,7 @@ func New(cfg Config) (agent.Agent, error) {
 		model:          cfg.Model,
 		instruction:    cfg.Instruction,
 		tools:          slices.Clone(cfg.Tools),
+		toolsets:       slices.Clone(cfg.Toolsets),
 		generateConfig: cfg.GenerateConfig,
 		maxModelCalls:  cfg.MaxModelCalls,
 	}, nil
@@ -83,7 +88,7 @@ func (a *llmAgent) Run(ctx context.Context, invocation *agent.InvocationContext)
 			yield(nil, err)
 			return
 		}
-		definitions, toolsByName, err := registerTools(a.tools)
+		definitions, toolsByName, err := registerTools(ctx, a.tools, a.toolsets)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -147,6 +152,10 @@ func (a *llmAgent) generate(ctx context.Context, invocation *agent.InvocationCon
 			if event.Message != nil {
 				req.Messages = append(req.Messages, *event.Message)
 			}
+		}
+		if err := a.processRequest(ctx, &req); err != nil {
+			yield(nil, err)
+			return
 		}
 		event := session.NewEvent(invocation.InvocationID)
 		event.Author = a.name

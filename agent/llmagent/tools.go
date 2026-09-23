@@ -4,12 +4,35 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/tool"
 )
 
-func registerTools(tools []tool.Tool) ([]model.ToolDefinition, map[string]tool.Tool, error) {
+func registerTools(ctx context.Context, static []tool.Tool, toolsets []tool.Toolset) ([]model.ToolDefinition, map[string]tool.Tool, error) {
+	tools := slices.Clone(static)
+	for i, ts := range toolsets {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		if ts == nil {
+			return nil, nil, fmt.Errorf("llmagent: toolsets[%d] must not be nil", i)
+		}
+		discovered, err := ts.Tools(ctx)
+		if err != nil {
+			return nil, nil, fmt.Errorf("llmagent: discover tools from toolset %q: %w", ts.Name(), err)
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		for j, t := range discovered {
+			if t == nil {
+				return nil, nil, fmt.Errorf("llmagent: toolset %q: tools[%d] must not be nil", ts.Name(), j)
+			}
+		}
+		tools = append(tools, discovered...)
+	}
 	var definitions []model.ToolDefinition
 	byName := make(map[string]tool.Tool, len(tools))
 	for i, t := range tools {
@@ -24,6 +47,20 @@ func registerTools(tools []tool.Tool) ([]model.ToolDefinition, map[string]tool.T
 		byName[definition.Name] = t
 	}
 	return definitions, byName, nil
+}
+
+func (a *llmAgent) processRequest(ctx context.Context, req *model.Request) error {
+	for _, ts := range a.toolsets {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if processor, ok := ts.(tool.RequestProcessor); ok {
+			if err := processor.ProcessRequest(ctx, req); err != nil {
+				return fmt.Errorf("llmagent: process request by toolset %q: %w", ts.Name(), err)
+			}
+		}
+	}
+	return ctx.Err()
 }
 
 func executeTool(ctx context.Context, toolsByName map[string]tool.Tool, call *model.ToolCallPart) (*model.ToolResultPart, error) {
