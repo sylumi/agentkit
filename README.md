@@ -1,6 +1,14 @@
-# AgentKit
+<h1 align="center">Agent Development Kit</h1>
 
-A Go library for building AI agents. It handles model calls, tool execution, and session history, with optional streaming output.
+<p align="center">
+  <img src="assets/agentkit-logo.svg" alt="AgentKit logo" width="160" height="160">
+</p>
+
+<p align="center">
+  A Go library for building AI agents.
+</p>
+
+---
 
 Currently includes:
 
