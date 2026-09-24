@@ -44,8 +44,8 @@ func NewModel(cfg Config) (model.LLM, error) {
 	return &openAIModel{client: &client, info: info}, nil
 }
 
-// ModelName returns the configured model ID for display.
-func (m *openAIModel) ModelName() string { return m.info.ID }
+// Name returns the configured model ID.
+func (m *openAIModel) Name() string { return m.info.ID }
 
 // Generate returns a lazy, single-use iterator. Each consumed iterator owns its
 // context, HTTP request, and output buffers. stream selects SSE or ordinary JSON

@@ -73,12 +73,9 @@ func New(cfg Config) (agent.Agent, error) {
 func (a *llmAgent) Name() string        { return a.name }
 func (a *llmAgent) Description() string { return a.description }
 
-// ModelName returns the configured model ID when the model exposes one.
+// ModelName returns the configured model ID.
 func (a *llmAgent) ModelName() string {
-	if named, ok := a.model.(interface{ ModelName() string }); ok {
-		return named.ModelName()
-	}
-	return ""
+	return a.model.Name()
 }
 
 // Run yields model and tool events until the model finishes or the call limit is reached.

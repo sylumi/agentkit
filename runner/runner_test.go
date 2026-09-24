@@ -31,6 +31,8 @@ func (f agentFunc) Run(ctx context.Context, invocation *agent.InvocationContext)
 
 type modelFunc func(context.Context, model.Request, bool) iter.Seq2[model.Event, error]
 
+func (f modelFunc) Name() string { return "test-model" }
+
 func (f modelFunc) Generate(ctx context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
 	return f(ctx, req, stream)
 }
