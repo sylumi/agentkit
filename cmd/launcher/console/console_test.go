@@ -14,6 +14,7 @@ import (
 	"github.com/sylumi/agentkit/cmd/launcher"
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/session/inmemory"
 )
 
 type testAgent struct {
@@ -36,7 +37,7 @@ func TestConsoleKeepsHistoryAndCancelsWhileWaitingForInput(t *testing.T) {
 			yield(e, nil)
 		}
 	}}
-	store := session.InMemoryService()
+	store := inmemory.New()
 	cfg := launcher.Config{Agent: a, SessionService: store, AppName: "custom-app", UserID: "alice"}
 	var output bytes.Buffer
 	if err := run(t.Context(), cfg, strings.NewReader("hi\n\nagain\n"), &output); err != nil {

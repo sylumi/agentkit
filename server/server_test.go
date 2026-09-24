@@ -19,6 +19,7 @@ import (
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/server"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/session/inmemory"
 	"github.com/sylumi/agentkit/tool"
 	"github.com/sylumi/agentkit/tool/functiontool"
 )
@@ -43,7 +44,7 @@ func echoAgent(ctx context.Context, inv *agent.InvocationContext) iter.Seq2[*ses
 
 func newServer(t *testing.T, a agent.Agent) (*server.Server, session.Service) {
 	t.Helper()
-	store := session.InMemoryService()
+	store := inmemory.New()
 	s, err := server.New(server.Config{AppName: "test", Agent: a, SessionService: store})
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +89,7 @@ func create(t *testing.T, h http.Handler) string {
 }
 
 func TestConfigAndHTTPValidation(t *testing.T) {
-	base := server.Config{AppName: "test", Agent: agentFunc(echoAgent), SessionService: session.InMemoryService()}
+	base := server.Config{AppName: "test", Agent: agentFunc(echoAgent), SessionService: inmemory.New()}
 	for _, mutate := range []func(*server.Config){
 		func(c *server.Config) { c.AppName = "" }, func(c *server.Config) { c.Agent = nil },
 		func(c *server.Config) { c.SessionService = nil },
@@ -497,7 +498,7 @@ func TestSessionSnapshotDuringRunCompletion(t *testing.T) {
 	readContext, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	store := &snapshotStore{
-		Service: session.InMemoryService(), readContext: readContext,
+		Service: inmemory.New(), readContext: readContext,
 		read: make(chan struct{}), resume: make(chan struct{}),
 	}
 	started, finish, committed := make(chan struct{}), make(chan struct{}), make(chan struct{})

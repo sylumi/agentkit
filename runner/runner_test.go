@@ -16,6 +16,7 @@ import (
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/runner"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/session/inmemory"
 	"github.com/sylumi/agentkit/tool"
 	"github.com/sylumi/agentkit/tool/functiontool"
 )
@@ -56,7 +57,7 @@ func (s serviceStub) AppendEvent(ctx context.Context, current session.Session, e
 
 func createSession(t *testing.T) session.Service {
 	t.Helper()
-	s := session.InMemoryService()
+	s := inmemory.New()
 	if _, err := s.Create(t.Context(), &session.CreateRequest{AppName: "app", UserID: "user", SessionID: "session"}); err != nil {
 		t.Fatal(err)
 	}

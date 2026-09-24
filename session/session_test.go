@@ -1,7 +1,6 @@
 package session_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -10,46 +9,8 @@ import (
 	"github.com/sylumi/agentkit/session"
 )
 
-func userEvent(text string) *session.Event {
+func TestEventJSONPreservesContent(t *testing.T) {
 	event := session.NewEvent("invocation")
-	event.Author = "user"
-	event.Message = &model.Message{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart(text)}}
-	return event
-}
-
-func toolCallMessage() *model.Message {
-	return &model.Message{Role: model.RoleAssistant, Parts: []model.Part{{
-		Kind: model.PartToolCall,
-		ToolCall: &model.ToolCallPart{
-			ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{ "id": 9007199254740993 }`),
-		},
-	}}}
-}
-
-func TestAppendEventPreservesPayloadWithoutValidation(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		event *session.Event
-	}{
-		{"empty record", &session.Event{}},
-		{"message without parts", &session.Event{Message: &model.Message{Role: model.RoleUser}}},
-		{"metadata without generation", &session.Event{Metadata: &model.ResponseMetadata{ResponseID: "response"}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			service, view := createSession(t, "payload")
-			if err := service.AppendEvent(t.Context(), view, tc.event); err != nil {
-				t.Fatal(err)
-			}
-			if got := getSession(t, service, view).Events().At(0); !reflect.DeepEqual(got, tc.event) {
-				t.Fatalf("event changed: got %+v, want %+v", got, tc.event)
-			}
-		})
-	}
-}
-
-func TestEventJSONAndAppendPreserveContent(t *testing.T) {
-	service, view := createSession(t, "json")
-	event := userEvent("hello")
 	event.Author = "assistant"
 	event.Message = &model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("answer")}}
 	event.StopReason = model.StopReasonStop
@@ -60,13 +21,6 @@ func TestEventJSONAndAppendPreserveContent(t *testing.T) {
 	before, err := json.Marshal(event)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if err := service.AppendEvent(t.Context(), view, event); err != nil {
-		t.Fatal(err)
-	}
-	after, err := json.Marshal(event)
-	if err != nil || !bytes.Equal(before, after) {
-		t.Fatalf("append changed event: %s, %v", after, err)
 	}
 	var decoded session.Event
 	if err := json.Unmarshal(before, &decoded); err != nil {
@@ -80,9 +34,7 @@ func TestEventJSONAndAppendPreserveContent(t *testing.T) {
 	}
 }
 
-func TestPartialEventsRoundTripWithoutPersistence(t *testing.T) {
-	service, view := createSession(t, "stream")
-	updated := view.LastUpdateTime()
+func TestPartialEventsRoundTrip(t *testing.T) {
 	for _, delta := range []model.Event{
 		model.PartStart{Index: 0, Kind: model.PartThinking, ThinkingKind: model.ThinkingSummary},
 		model.ThinkingDelta{Index: 0, Delta: "Checking"},
@@ -100,12 +52,5 @@ func TestPartialEventsRoundTripWithoutPersistence(t *testing.T) {
 		if err := json.Unmarshal(data, &decoded); err != nil || !reflect.DeepEqual(event, &decoded) {
 			t.Fatalf("partial event changed during JSON round trip: %s, %v", data, err)
 		}
-		if err := service.AppendEvent(t.Context(), view, &decoded); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stored := getSession(t, service, view)
-	if view.Events().Len() != 0 || stored.Events().Len() != 0 || !view.LastUpdateTime().Equal(updated) || !stored.LastUpdateTime().Equal(updated) {
-		t.Fatal("partial events changed session history or update time")
 	}
 }

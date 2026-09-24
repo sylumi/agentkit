@@ -7,6 +7,7 @@ import (
 
 	"github.com/sylumi/agentkit/agent"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/session/inmemory"
 )
 
 // Config supplies an Agent and optional services to console and web launchers.
@@ -35,7 +36,7 @@ func (c Config) Resolve() (Config, error) {
 		return Config{}, fmt.Errorf("launcher: app name and user ID must not be blank")
 	}
 	if c.SessionService == nil {
-		c.SessionService = session.InMemoryService()
+		c.SessionService = inmemory.New()
 	}
 	return c, nil
 }
