@@ -16,6 +16,7 @@ import (
 	"github.com/sylumi/agentkit/agent/llmagent"
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/session/inmemory"
 	"github.com/sylumi/agentkit/tool"
 	"github.com/sylumi/agentkit/tool/functiontool"
 )
@@ -152,7 +153,7 @@ func toolCallResult(calls ...model.ToolCallPart) model.Result {
 
 func newInvocation(t *testing.T) (session.Service, *agent.InvocationContext) {
 	t.Helper()
-	service := session.InMemoryService()
+	service := inmemory.New()
 	created, err := service.Create(t.Context(), &session.CreateRequest{AppName: "test", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)

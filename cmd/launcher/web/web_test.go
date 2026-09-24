@@ -19,6 +19,7 @@ import (
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/model/openaimodel"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/session/inmemory"
 	webui "github.com/sylumi/agentkit/web"
 )
 
@@ -160,7 +161,7 @@ func TestWebUsesConfiguredServiceWithoutUI(t *testing.T) {
 			yield(e, nil)
 		}
 	}}
-	store := session.InMemoryService()
+	store := inmemory.New()
 	cfg := launcher.Config{Agent: a, SessionService: store, AppName: "custom-app", UserID: "alice"}
 	h, err := NewHandler(cfg, nil)
 	if err != nil {

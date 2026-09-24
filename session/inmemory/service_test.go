@@ -1,4 +1,4 @@
-package session_test
+package inmemory_test
 
 import (
 	"bytes"
@@ -14,11 +14,12 @@ import (
 
 	"github.com/sylumi/agentkit/model"
 	"github.com/sylumi/agentkit/session"
+	"github.com/sylumi/agentkit/session/inmemory"
 )
 
 func createSession(t *testing.T, id string) (session.Service, session.Session) {
 	t.Helper()
-	service := session.InMemoryService()
+	service := inmemory.New()
 	created, err := service.Create(t.Context(), &session.CreateRequest{AppName: "app", UserID: "user", SessionID: id})
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +37,7 @@ func getSession(t *testing.T, service session.Service, view session.Session) ses
 }
 
 func TestServiceLifecycleAndIdentityIsolation(t *testing.T) {
-	service := session.InMemoryService()
+	service := inmemory.New()
 	ctx := t.Context()
 	request := &session.CreateRequest{AppName: "app", UserID: "user"}
 	generated, err := service.Create(ctx, request)
@@ -226,7 +227,7 @@ func TestAppendRejectsInvalidAndMissingSessions(t *testing.T) {
 }
 
 func TestServiceInputValidation(t *testing.T) {
-	service := session.InMemoryService()
+	service := inmemory.New()
 	_, createErr := service.Create(t.Context(), &session.CreateRequest{AppName: " ", UserID: "user"})
 	_, getErr := service.Get(t.Context(), &session.GetRequest{AppName: "app", UserID: "user"})
 	_, listErr := service.List(t.Context(), &session.ListRequest{AppName: "app"})
@@ -278,5 +279,90 @@ func TestServiceConcurrentAccess(t *testing.T) {
 		if !seen[fmt.Sprint(i)] {
 			t.Fatalf("lost message from worker %d", i)
 		}
+	}
+}
+
+func userEvent(text string) *session.Event {
+	event := session.NewEvent("invocation")
+	event.Author = "user"
+	event.Message = &model.Message{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart(text)}}
+	return event
+}
+
+func toolCallMessage() *model.Message {
+	return &model.Message{Role: model.RoleAssistant, Parts: []model.Part{{
+		Kind: model.PartToolCall,
+		ToolCall: &model.ToolCallPart{
+			ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{ "id": 9007199254740993 }`),
+		},
+	}}}
+}
+
+func TestAppendEventPreservesPayloadWithoutValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		event *session.Event
+	}{
+		{"empty record", &session.Event{}},
+		{"message without parts", &session.Event{Message: &model.Message{Role: model.RoleUser}}},
+		{"metadata without generation", &session.Event{Metadata: &model.ResponseMetadata{ResponseID: "response"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, view := createSession(t, "payload")
+			if err := service.AppendEvent(t.Context(), view, tc.event); err != nil {
+				t.Fatal(err)
+			}
+			if got := getSession(t, service, view).Events().At(0); !reflect.DeepEqual(got, tc.event) {
+				t.Fatalf("event changed: got %+v, want %+v", got, tc.event)
+			}
+		})
+	}
+}
+
+func TestAppendEventPreservesInput(t *testing.T) {
+	service, view := createSession(t, "json")
+	event := session.NewEvent("invocation")
+	event.Author = "assistant"
+	event.Message = &model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("answer")}}
+	event.StopReason = model.StopReasonStop
+	count := int64(0)
+	event.Usage = &model.Usage{InputTokens: &count}
+	event.Metadata = &model.ResponseMetadata{Provider: "test", ResponseID: "provider-response"}
+
+	before, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.AppendEvent(t.Context(), view, event); err != nil {
+		t.Fatal(err)
+	}
+	after, err := json.Marshal(event)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("append changed event: %s, %v", after, err)
+	}
+	if got := getSession(t, service, view).Events().At(0); !reflect.DeepEqual(got, event) {
+		t.Fatalf("stored event changed: got %+v, want %+v", got, event)
+	}
+}
+
+func TestPartialEventsDoNotPersist(t *testing.T) {
+	service, view := createSession(t, "stream")
+	updated := view.LastUpdateTime()
+	for _, delta := range []model.Event{
+		model.PartStart{Index: 0, Kind: model.PartThinking, ThinkingKind: model.ThinkingSummary},
+		model.ThinkingDelta{Index: 0, Delta: "Checking"},
+		model.TextDelta{Index: 1, Delta: "Hello"},
+		model.ToolCallDelta{Index: 2, ID: "call", Name: "lookup", Arguments: `{"city":`},
+		model.PartEnd{Index: 0},
+	} {
+		event := session.NewEvent("run")
+		event.Author, event.Partial, event.Delta = "agent", true, delta
+		if err := service.AppendEvent(t.Context(), view, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored := getSession(t, service, view)
+	if view.Events().Len() != 0 || stored.Events().Len() != 0 || !view.LastUpdateTime().Equal(updated) || !stored.LastUpdateTime().Equal(updated) {
+		t.Fatal("partial events changed session history or update time")
 	}
 }
