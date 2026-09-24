@@ -129,7 +129,7 @@ func TestWebInfersPublicModelLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := llmagent.New(llmagent.Config{Name: "chat", Model: llm})
+	a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Model: llm})
 	if err != nil {
 		t.Fatal(err)
 	}

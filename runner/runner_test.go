@@ -132,7 +132,8 @@ func TestRunToolLoopAndNextTurn(t *testing.T) {
 			}
 			var requests []model.Request
 			a, err := llmagent.New(llmagent.Config{
-				Name: "weather-agent", Tools: []tool.Tool{weather},
+				MaxModelCalls: 10,
+				Name:          "weather-agent", Tools: []tool.Tool{weather},
 				Model: modelFunc(func(ctx context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
 					modelCalls++
 					if ctx != t.Context() || stream != streaming || modelCalls > 3 {
