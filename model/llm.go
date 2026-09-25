@@ -9,6 +9,9 @@ import (
 // Implementations must support independent concurrent calls without sharing
 // mutable generation state between them.
 type LLM interface {
+	// Name returns the configured model ID, not its display name.
+	Name() string
+
 	// Generate returns a lazy, single-use iterator. No request or background
 	// reading starts until iteration, which checks ctx and validates req before
 	// I/O. Reusing the iterator must fail without sending another request.

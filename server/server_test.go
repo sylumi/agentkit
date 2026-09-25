@@ -298,6 +298,8 @@ func TestTerminalOutcomes(t *testing.T) {
 
 type modelFunc func(context.Context, model.Request, bool) iter.Seq2[model.Event, error]
 
+func (f modelFunc) Name() string { return "test-model" }
+
 func (f modelFunc) Generate(ctx context.Context, r model.Request, stream bool) iter.Seq2[model.Event, error] {
 	return f(ctx, r, stream)
 }
