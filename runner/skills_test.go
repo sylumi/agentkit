@@ -32,7 +32,8 @@ func TestRunSkillsToolset(t *testing.T) {
 			calls := 0
 			var firstInstructions string
 			a, err := llmagent.New(llmagent.Config{
-				Name: "skills", Instruction: "Help the user.", Toolsets: []tool.Toolset{skills},
+				MaxModelCalls: 10,
+				Name:          "skills", Instruction: "Help the user.", Toolsets: []tool.Toolset{skills},
 				Model: modelFunc(func(_ context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
 					calls++
 					if stream != streaming {

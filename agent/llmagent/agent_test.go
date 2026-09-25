@@ -87,7 +87,7 @@ func TestStreamingEvents(t *testing.T) {
 					}}}}, nil)
 				}
 			})
-			a, err := llmagent.New(llmagent.Config{Name: "streaming-agent", Model: llm})
+			a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "streaming-agent", Model: llm})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +169,8 @@ func TestNew(t *testing.T) {
 		return nil
 	})
 	for _, cfg := range []llmagent.Config{
-		{Model: llm}, {Name: " \t", Model: llm}, {Name: "chat"},
+		{Model: llm, MaxModelCalls: 1}, {Name: " \t", Model: llm, MaxModelCalls: 1}, {Name: "chat", MaxModelCalls: 1},
+		{Name: "chat", Model: llm, MaxModelCalls: 0},
 		{Name: "chat", Model: llm, MaxModelCalls: -1},
 	} {
 		if _, err := llmagent.New(cfg); err == nil {
@@ -177,7 +178,7 @@ func TestNew(t *testing.T) {
 		}
 	}
 	for _, description := range []string{"", "Answers questions."} {
-		a, err := llmagent.New(llmagent.Config{Name: "chat", Description: description, Model: llm})
+		a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Description: description, Model: llm})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +186,7 @@ func TestNew(t *testing.T) {
 			t.Fatalf("agent identity: %q, %q", a.Name(), a.Description())
 		}
 	}
-	for _, limit := range []int{0, 1, 20} {
+	for _, limit := range []int{1, 20} {
 		if _, err := llmagent.New(llmagent.Config{Name: "chat", Model: llm, MaxModelCalls: limit}); err != nil {
 			t.Fatalf("rejected model call limit %d: %v", limit, err)
 		}
@@ -229,7 +230,8 @@ func TestRunToolsAndGenerateConfig(t *testing.T) {
 			}
 			modelCalls := 0
 			a, err := llmagent.New(llmagent.Config{
-				Name: "chat", Instruction: wantRequest.Instructions,
+				MaxModelCalls: 10,
+				Name:          "chat", Instruction: wantRequest.Instructions,
 				Tools: configuredTools, GenerateConfig: tc.config,
 				Model: modelFunc(func(_ context.Context, req model.Request, stream bool) iter.Seq2[model.Event, error] {
 					modelCalls++
@@ -292,7 +294,8 @@ func TestRunRejectsInvalidTools(t *testing.T) {
 				wantError = `duplicate tool name "weather"`
 			}
 			a, err := llmagent.New(llmagent.Config{
-				Name: "chat", Tools: configuredTools,
+				MaxModelCalls: 10,
+				Name:          "chat", Tools: configuredTools,
 				Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 					t.Fatal("invalid tools reached the model")
 					return nil
@@ -358,7 +361,8 @@ func TestRunHistoryAndPersistence(t *testing.T) {
 		}
 	})
 	a, err := llmagent.New(llmagent.Config{
-		Name: "chat", Description: "Not a prompt.", Model: llm, Instruction: "Keep {placeholders} literal.",
+		MaxModelCalls: 10,
+		Name:          "chat", Description: "Not a prompt.", Model: llm, Instruction: "Keep {placeholders} literal.",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -484,7 +488,7 @@ func TestRunModelErrors(t *testing.T) {
 				Partial: model.PartialOutput{Parts: []model.PartialPart{{Kind: model.PartText, Text: &partialText}}},
 			}
 			closed := false
-			a, err := llmagent.New(llmagent.Config{Name: "chat", Model: modelFunc(
+			a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Model: modelFunc(
 				func(modelCtx context.Context, _ model.Request, _ bool) iter.Seq2[model.Event, error] {
 					return func(yield func(model.Event, error) bool) {
 						defer func() { closed = true }()
@@ -518,7 +522,7 @@ func TestRunModelErrors(t *testing.T) {
 func TestRunCanceledBeforeConsumption(t *testing.T) {
 	_, invocation := newInvocation(t)
 	configuredTool := &stubTool{t: t, definition: model.ToolDefinition{Name: "weather"}}
-	a, err := llmagent.New(llmagent.Config{Name: "chat", Tools: []tool.Tool{configuredTool}, Model: modelFunc(
+	a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Tools: []tool.Tool{configuredTool}, Model: modelFunc(
 		func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 			t.Fatal("canceled invocation called the model")
 			return nil
@@ -548,7 +552,7 @@ func TestRunCanceledBeforeConsumption(t *testing.T) {
 func TestRunEarlyExit(t *testing.T) {
 	_, invocation := newInvocation(t)
 	closed, stopped := false, false
-	a, err := llmagent.New(llmagent.Config{Name: "chat", Model: modelFunc(
+	a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Model: modelFunc(
 		func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 			return func(yield func(model.Event, error) bool) {
 				defer func() { closed = true }()
@@ -707,7 +711,8 @@ func TestRunMultipleToolsAndErrors(t *testing.T) {
 	}
 	modelCalls := 0
 	a, err := llmagent.New(llmagent.Config{
-		Name: "chat", Tools: []tool.Tool{second, first},
+		MaxModelCalls: 10,
+		Name:          "chat", Tools: []tool.Tool{second, first},
 		Model: modelFunc(func(_ context.Context, req model.Request, _ bool) iter.Seq2[model.Event, error] {
 			modelCalls++
 			steps = append(steps, fmt.Sprintf("model-%d", modelCalls))
@@ -754,7 +759,7 @@ func TestRunModelCallLimit(t *testing.T) {
 		limit int
 		want  int
 	}{
-		{name: "default", want: 10},
+		{name: "ten calls", limit: 10, want: 10},
 		{name: "one call", limit: 1, want: 1},
 		{name: "two calls", limit: 2, want: 2},
 	} {
@@ -830,7 +835,8 @@ func TestRunStopsBeforeFurtherWork(t *testing.T) {
 					return "done", nil
 				}}
 				a, err := llmagent.New(llmagent.Config{
-					Name: "chat", Tools: []tool.Tool{lookup},
+					MaxModelCalls: 10,
+					Name:          "chat", Tools: []tool.Tool{lookup},
 					Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 						modelCalls++
 						if modelCalls != 1 {
@@ -902,7 +908,8 @@ func TestRunToolCancellation(t *testing.T) {
 			}}
 			modelCalls := 0
 			a, err := llmagent.New(llmagent.Config{
-				Name: "chat", Tools: []tool.Tool{lookup},
+				MaxModelCalls: 10,
+				Name:          "chat", Tools: []tool.Tool{lookup},
 				Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 					modelCalls++
 					if modelCalls != 1 {
@@ -947,7 +954,8 @@ func TestRunPersistenceFailureStops(t *testing.T) {
 				return "done", nil
 			}}
 			a, err := llmagent.New(llmagent.Config{
-				Name: "chat", Tools: []tool.Tool{lookup},
+				MaxModelCalls: 10,
+				Name:          "chat", Tools: []tool.Tool{lookup},
 				Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 					modelCalls++
 					if modelCalls != 1 {
@@ -1001,7 +1009,8 @@ func TestRunModelErrorAfterTool(t *testing.T) {
 	}}
 	closed := false
 	a, err := llmagent.New(llmagent.Config{
-		Name: "chat", Tools: []tool.Tool{lookup},
+		MaxModelCalls: 10,
+		Name:          "chat", Tools: []tool.Tool{lookup},
 		Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 			modelCalls++
 			if modelCalls == 1 {

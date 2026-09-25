@@ -337,7 +337,7 @@ func TestLLMAgentToolsAcrossTurns(t *testing.T) {
 					yield(model.ResultEvent{Result: result}, nil)
 				}
 			})
-			a, err := llmagent.New(llmagent.Config{Name: "calculator", Model: llm, Tools: []tool.Tool{add}})
+			a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "calculator", Model: llm, Tools: []tool.Tool{add}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -420,7 +420,7 @@ func TestLiveStreamArrivesBeforeFinalCommit(t *testing.T) {
 			}}}}, nil)
 		}
 	})
-	a, err := llmagent.New(llmagent.Config{Name: "live", Model: llm})
+	a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "live", Model: llm})
 	if err != nil {
 		t.Fatal(err)
 	}

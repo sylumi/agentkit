@@ -14,8 +14,6 @@ import (
 	"github.com/sylumi/agentkit/tool"
 )
 
-const defaultMaxModelCalls = 10
-
 // Config describes an LLM agent.
 type Config struct {
 	Name        string
@@ -29,7 +27,7 @@ type Config struct {
 	Toolsets []tool.Toolset
 	// GenerateConfig and its nested data must remain unchanged during Run.
 	GenerateConfig *model.GenerateConfig
-	// MaxModelCalls limits model calls per Run; zero defaults to 10.
+	// MaxModelCalls limits model calls per Run and must be positive.
 	MaxModelCalls int
 }
 
@@ -52,11 +50,8 @@ func New(cfg Config) (agent.Agent, error) {
 	if cfg.Model == nil {
 		return nil, fmt.Errorf("llmagent: model is required")
 	}
-	if cfg.MaxModelCalls < 0 {
-		return nil, fmt.Errorf("llmagent: max model calls must not be negative")
-	}
-	if cfg.MaxModelCalls == 0 {
-		cfg.MaxModelCalls = defaultMaxModelCalls
+	if cfg.MaxModelCalls <= 0 {
+		return nil, fmt.Errorf("llmagent: max model calls must be positive")
 	}
 	return &llmAgent{
 		name:           cfg.Name,

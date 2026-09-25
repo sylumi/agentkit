@@ -76,7 +76,8 @@ func TestToolsetsLifecycle(t *testing.T) {
 			sets := []tool.Toolset{first, plain, emptySet}
 			modelCalls := 0
 			a, err := llmagent.New(llmagent.Config{
-				Name: "chat", Instruction: "base", Tools: []tool.Tool{newTool("static")},
+				MaxModelCalls: 10,
+				Name:          "chat", Instruction: "base", Tools: []tool.Tool{newTool("static")},
 				Toolsets: sets, GenerateConfig: &model.GenerateConfig{},
 				Model: modelFunc(func(_ context.Context, req model.Request, _ bool) iter.Seq2[model.Event, error] {
 					modelCalls++
@@ -154,7 +155,8 @@ func TestEmptyToolsetDiscoveredOnce(t *testing.T) {
 			store, invocation := newInvocation(t)
 			discoveries, modelCalls := 0, 0
 			a, err := llmagent.New(llmagent.Config{
-				Name: "empty", Toolsets: []tool.Toolset{toolsetFunc{"empty", func(context.Context) ([]tool.Tool, error) {
+				MaxModelCalls: 10,
+				Name:          "empty", Toolsets: []tool.Toolset{toolsetFunc{"empty", func(context.Context) ([]tool.Tool, error) {
 					discoveries++
 					return empty, nil
 				}}},
@@ -204,7 +206,7 @@ func TestToolsetRegistrationFailures(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, invocation := newInvocation(t)
-			a, err := llmagent.New(llmagent.Config{Name: "chat", Tools: tc.tools, Toolsets: tc.sets,
+			a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Tools: tc.tools, Toolsets: tc.sets,
 				Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 					t.Fatal("invalid registration reached model")
 					return nil
@@ -263,7 +265,7 @@ func TestToolsetFailureAndCancellation(t *testing.T) {
 					toolsetFunc: toolsetFunc{"later", func(context.Context) ([]tool.Tool, error) { laterDiscoveries++; return nil, nil }},
 					process:     func(context.Context, *model.Request) error { t.Fatal("processing continued after failure"); return nil },
 				}
-				a, err := llmagent.New(llmagent.Config{Name: "chat", Toolsets: []tool.Toolset{first, later},
+				a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Toolsets: []tool.Toolset{first, later},
 					Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 						t.Fatal("model called after failure")
 						return nil
@@ -318,7 +320,7 @@ func TestToolsetsConcurrentRuns(t *testing.T) {
 			return nil
 		},
 	}
-	a, err := llmagent.New(llmagent.Config{Name: "chat", Instruction: "base", Toolsets: []tool.Toolset{set},
+	a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Instruction: "base", Toolsets: []tool.Toolset{set},
 		Model: modelFunc(func(ctx context.Context, req model.Request, _ bool) iter.Seq2[model.Event, error] {
 			id := ctx.Value(runKey{}).(string)
 			if req.Instructions != "base|"+id {
@@ -384,7 +386,7 @@ func TestToolsetProcessingStopsWithRun(t *testing.T) {
 					return cause
 				},
 			}
-			a, err := llmagent.New(llmagent.Config{Name: "chat", Toolsets: []tool.Toolset{set},
+			a, err := llmagent.New(llmagent.Config{MaxModelCalls: 10, Name: "chat", Toolsets: []tool.Toolset{set},
 				Model: modelFunc(func(context.Context, model.Request, bool) iter.Seq2[model.Event, error] {
 					modelCalls++
 					return resultStream(toolCallResult(model.ToolCallPart{ID: "call", Name: "lookup", Arguments: json.RawMessage(`{}`)}))

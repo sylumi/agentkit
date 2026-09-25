@@ -40,10 +40,11 @@ func main() {
 
 	thinking, maxOutput := true, int64(4096)
 	a, err := llmagent.New(llmagent.Config{
-		Name:        "assistant",
-		Model:       llm,
-		Instruction: "You are a helpful assistant. Answer in the user's language. Use get_current_time when you need the current date or time.",
-		Tools:       []tool.Tool{currentTime},
+		MaxModelCalls: 10,
+		Name:          "assistant",
+		Model:         llm,
+		Instruction:   "You are a helpful assistant. Answer in the user's language. Use get_current_time when you need the current date or time.",
+		Tools:         []tool.Tool{currentTime},
 		GenerateConfig: &model.GenerateConfig{
 			MaxOutputTokens: &maxOutput,
 			Reasoning:       &model.ReasoningConfig{Enabled: &thinking, Effort: "high"},
