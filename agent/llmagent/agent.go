@@ -74,6 +74,7 @@ func (a *llmAgent) ModelName() string {
 }
 
 // Run yields model and tool events until the model finishes or the call limit is reached.
+// Model request history groups tool results with their calls and omits unpaired calls and results.
 func (a *llmAgent) Run(ctx context.Context, invocation *agent.InvocationContext) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
 		if err := ctx.Err(); err != nil {
@@ -135,15 +136,16 @@ func (a *llmAgent) Run(ctx context.Context, invocation *agent.InvocationContext)
 
 func (a *llmAgent) generate(ctx context.Context, invocation *agent.InvocationContext, definitions []model.ToolDefinition) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
+		messages, err := buildHistory(invocation.Session.Events())
+		if err != nil {
+			yield(nil, err)
+			return
+		}
 		req := model.Request{
 			Instructions: a.instruction,
+			Messages:     messages,
 			Tools:        definitions,
 			Config:       a.generateConfig,
-		}
-		for event := range invocation.Session.Events().All() {
-			if event.Message != nil {
-				req.Messages = append(req.Messages, *event.Message)
-			}
 		}
 		if err := a.processRequest(ctx, &req); err != nil {
 			yield(nil, err)
