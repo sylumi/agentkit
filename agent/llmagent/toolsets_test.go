@@ -106,11 +106,11 @@ func TestToolsetsLifecycle(t *testing.T) {
 						}
 						return resultStream(toolCallResult(calls...))
 					}
-					if len(req.Messages) != 4 {
+					if len(req.Messages) != 2 || req.Messages[1].Role != model.RoleTool || len(req.Messages[1].Parts) != len(want) {
 						t.Fatalf("history: %+v", req.Messages)
 					}
 					for i, name := range want {
-						result := req.Messages[i+1].Parts[0].ToolResult
+						result := req.Messages[1].Parts[i].ToolResult
 						if result == nil || result.IsError || result.Content != name || result.CallID != name {
 							t.Fatalf("wrong tool executed: %+v", result)
 						}

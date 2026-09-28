@@ -719,13 +719,16 @@ func TestRunMultipleToolsAndErrors(t *testing.T) {
 			if modelCalls == 1 {
 				return resultStream(call)
 			}
-			if modelCalls != 2 || len(req.Messages) != 5 || !reflect.DeepEqual(req.Messages[0], *call.Message) {
+			if modelCalls != 2 || len(req.Messages) != 2 || !reflect.DeepEqual(req.Messages[0], *call.Message) {
 				t.Fatalf("unexpected follow-up request: %+v", req)
 			}
+			message := req.Messages[1]
+			if message.Role != model.RoleTool || len(message.Parts) != len(wantResults) {
+				t.Fatalf("merged tool results: %+v", message)
+			}
 			for i, want := range wantResults {
-				message := req.Messages[i+1]
-				if message.Role != model.RoleTool || len(message.Parts) != 1 || !reflect.DeepEqual(message.Parts[0].ToolResult, &want) {
-					t.Fatalf("tool result %d: %+v", i, message)
+				if !reflect.DeepEqual(message.Parts[i].ToolResult, &want) {
+					t.Fatalf("tool result %d: %+v", i, message.Parts[i])
 				}
 			}
 			return resultStream(model.Result{StopReason: model.StopReasonStop})
